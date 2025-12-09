@@ -1,0 +1,118 @@
+{
+  "description": "Adjusted category split to focus solely on in-category validation (seen categories only), removing zero-shot component to validate pipeline internal consistency.",
+  "version": "2.0_in_domain_only",
+
+  "dataset_stats": {
+    "total_samples": 1045,
+    "total_categories": 23,
+    "motion_type_distribution": {
+      "note": "Approximate, based on category analysis"
+    }
+  },
+
+  "_comment_validation_strategy": "In-category validation only: 10% of samples from ALL training categories are used for validation. All validation data is 'seen'.",
+
+  "validation_strategy": "in_category_only", 
+  
+  "train_categories": [
+    "StorageFurniture",
+    "Table",
+    "Toilet",
+    "TrashCan",
+    "Remote",
+    "CoffeeMachine",
+    "Dishwasher",
+    "Refrigerator",
+    "Camera",
+    "Safe",
+    "Printer",
+    "Box",
+    "KitchenPot",
+    "Toaster",
+    "WashingMachine",
+    "Microwave",
+    "Phone",
+    "Door",
+    "Suitcase",
+    "Bucket",
+    "Keyboard",
+    "Oven",
+    "Laptop" 
+  ],
+
+  "val_in_category": {
+    "_comment": "In-category validation: 10% of samples from each training category",
+    "enabled": true,
+    "split_ratio": 0.1,
+    "stratify_by_joint_type": true,
+    "random_seed": 42
+  },
+
+  "val_cross_category": {
+    "_comment": "Cross-category validation: set to disabled/empty as requested (all categories are now in 'train_categories')",
+    "categories": [],
+    "enabled": false
+  },
+
+  "motion_type_balance": {
+    "_comment": "Balance revolute and prismatic samples during training",
+    "enabled": true,
+    "method": "weighted_sampling",
+    "target_ratio": 1.0,
+    "_target_ratio_note": "Target Revolute:Prismatic = 3:1 (more balanced than 18:1)",
+    "oversample_minority": true
+  },
+
+  "category_counts": {
+    "StorageFurniture": 324,
+    "Table": 77,
+    "Toilet": 66,
+    "TrashCan": 52,
+    "Remote": 49,
+    "Laptop": 48,
+    "CoffeeMachine": 41,
+    "Dishwasher": 41,
+    "Refrigerator": 37,
+    "Camera": 32,
+    "Bucket": 31,
+    "Keyboard": 31,
+    "Safe": 29,
+    "Printer": 28,
+    "Box": 25,
+    "Oven": 23,
+    "KitchenPot": 20,
+    "Toaster": 19,
+    "WashingMachine": 17,
+    "Microwave": 16,
+    "Phone": 15,
+    "Door": 14,
+    "Suitcase": 10
+  },
+
+  "expected_motion_types": {
+    "_comment": "Estimated motion type for each category (may contain mixed types)",
+    "StorageFurniture": "mixed",
+    "Table": "revolute",
+    "Toilet": "revolute",
+    "TrashCan": "revolute",
+    "Remote": "prismatic",
+    "CoffeeMachine": "revolute",
+    "Dishwasher": "revolute",
+    "Refrigerator": "revolute",
+    "Camera": "revolute",
+    "Safe": "revolute",
+    "Printer": "revolute",
+    "Box": "revolute",
+    "KitchenPot": "revolute",
+    "Toaster": "revolute",
+    "WashingMachine": "revolute",
+    "Microwave": "revolute",
+    "Phone": "revolute",
+    "Door": "revolute",
+    "Suitcase": "revolute",
+    "Laptop": "revolute",
+    "Bucket": "revolute",
+    "Keyboard": "prismatic",
+    "Oven": "revolute"
+  }
+}
