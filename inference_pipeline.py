@@ -1,11 +1,5 @@
 # -------------------------------------------------------------------
-# 文件: inference_pipeline.py
-#
-# 轻量交互式推理:
-#   - 输入: 已分割好的 OBJ (可选 mask 文件)
-#   - 在 3D UI 里选择拖拽点 / 方向，或手动传入坐标
-#   - 可用 LLM / 手动指定旋转 or 平移
-#   - 通过 KPP + VAE -> 调用 inference_animation 的 run_animation_from_sample 输出 GIF/GLB
+#  inference_pipeline.py
 # -------------------------------------------------------------------
 
 import argparse
@@ -42,9 +36,6 @@ except ImportError:
     RayMeshIntersector = None
 
 
-# -------------------------------------------------------------------
-#  几何 & 掩码辅助
-# -------------------------------------------------------------------
 
 def face_to_vertex_labels(faces: np.ndarray, num_vertices: int, face_labels: np.ndarray) -> np.ndarray:
     vertex_faces: List[List[int]] = [[] for _ in range(num_vertices)]
@@ -108,9 +99,7 @@ def create_segmented_part(mesh: trimesh.Trimesh,
     return SegmentedPart(label, mask, drag_point, drag_vector, indices.size)
 
 
-# -------------------------------------------------------------------
-#  3D 拖拽点拾取
-# -------------------------------------------------------------------
+
 
 def launch_drag_picker(mesh: trimesh.Trimesh,
                        vertex_labels: np.ndarray,
@@ -473,9 +462,6 @@ def launch_drag_picker(mesh: trimesh.Trimesh,
     return state["part_id"], state["point"], state["vector"]
 
 
-# -------------------------------------------------------------------
-#  模型加载 / KPP 推理
-# -------------------------------------------------------------------
 
 def sample_point_cloud(mesh: trimesh.Trimesh, num_points: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     normalized = mesh.copy()
@@ -539,9 +525,6 @@ def load_vae_model(checkpoint_path: str, device: torch.device, override_frames: 
     return vae_model, num_frames
 
 
-# -------------------------------------------------------------------
-#  LLM 分类
-# -------------------------------------------------------------------
 
 class LLMJointClassifier:
     def __init__(self, endpoint: Optional[str], api_key: Optional[str],
@@ -602,9 +585,6 @@ class LLMJointClassifier:
         return None, None
 
 
-# -------------------------------------------------------------------
-#  CLI
-# -------------------------------------------------------------------
 
 def parse_vec3(value: str) -> np.ndarray:
     parts = [float(v) for v in value.split(',')]
