@@ -1,11 +1,14 @@
 """
-文件: utils/balanced_dataset_utils.py
-版本: V30 R1 (基于第一性原理优化)
+File: utils/balanced_dataset_utils.py
 
-职责:
-1. 提供 VAE_LMDBDataset，用于从 LMDB 快速加载数据。
-2. 提供 get_motion_type_weights，用于在 DataLoader 中实现旋转/平移运动的平衡采样。
-3. 补充基础数据增强函数，以确保 VAE_LMDBDataset 中的 'augment' 标记可用。
+Responsibilities:
+
+1. Provides VAE_LMDBDataset for fast data loading from LMDB.
+
+2. Provides get_motion_type_weights for implementing balanced sampling of rotational/translational motions in the DataLoader.
+
+3. Supplements basic data augmentation functions to ensure the 'augment' flag is available in VAE_LMDBDataset.
+
 """
 import os
 import json
