@@ -11,8 +11,7 @@ Official repository for the paper **"DragMesh: Interactive 3D Generation Made Ea
 > [!NOTE]  
 >  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
 
-
-https://github.com/user-attachments/assets/f36f1ade-27c2-484e-a8e9-eba325fc8c25
+https://github.com/user-attachments/assets/cec1da8b-70eb-41b8-88a4-27bbbaab7fc8
 
 ## 🧾 Citation
 If you find DragMesh helpful, please cite:
