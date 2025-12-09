@@ -9,13 +9,12 @@ Official repository for the paper **"DragMesh: Interactive 3D Generation Made Ea
 > [Paper (PDF)]() | [Project Website](https://aigeeksgroup.github.io/DragMesh) | [Hugging Face Models](https://huggingface.co/AIGeeksGroup/DragMesh)
 
 > [!NOTE]  
-> - GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
-> - The Hugging Face repo mirrors released checkpoints, demo meshes, and metadata.  
-> - Example inference videos currently live on `C:\Users\Plote\Desktop\results_deterministic`; see **Results & Assets** for integration instructions.
+>  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
 
 
+https://github.com/user-attachments/assets/f36f1ade-27c2-484e-a8e9-eba325fc8c25
 
-## Citation
+## 🧾 Citation
 If you find DragMesh helpful, please cite:
 ```bibtex
 
@@ -23,26 +22,24 @@ If you find DragMesh helpful, please cite:
 
 ---
 
-## Introduction
+## ✨ Intro
 
 While generative models have excelled at creating static 3D content, the pursuit of systems that understand how objects move and respond to interactions remains a fundamental challenge. Current methods for articulated motion lie at a crossroads: they are either physically consistent but too slow for real-time use, or generative but violate basic kinematic constraints. We present DragMesh, a robust framework for real-time interactive 3D articulation built around a lightweight motion generation core. Our core contribution is a novel decoupled kinematic reasoning and motion generation framework. First, we infer the latent joint parameters by decoupling semantic intent reasoning (which determines the joint type) from geometric regression (which determines the axis and origin using our Kinematics Prediction Network (KPP-Net)). Second, to leverage the compact, continuous, and singularity-free properties of dual quaternions for representing rigid body motion, we develop a novel Dual Quaternion VAE (DQ-VAE). This DQ-VAE receives these predicted priors, along with the original user drag, to generate a complete, plausible motion trajectory. To ensure strict adherence to kinematics, we inject the joint priors at every layer of the DQ-VAE's non-autoregressive Transformer decoder using FiLM (Feature-wise Linear Modulation) conditioning. This persistent, multi-scale guidance is complemented by a numerically-stable cross-product loss to guarantee axis alignment. This decoupled design allows DragMesh to achieve real-time performance and enables plausible, generative articulation on novel objects without retraining, offering a practical step toward generative 3D intelligence.
 
 
-## News
-- **2025-12-08:** README rebuilt to follow the new documentation layout; environment file now named `dragmesh`.  
-- **2025-11-24:** Released public checkpoints (`best_model.pth`, `best_model_kpp.pth`) and demo renders.  
-- **2025-11-14:** Initial code release with ChamferDistancePytorch kernels and dataset tooling.
+## 📰 News
 
-## TODO
+
+## ✅ TODO
 - [x] Upload the DragMesh paper and project page.
 - [x] Release the training and inference code.
 - [x] Provide GAPartNet processing pipeline and LMDB builder.
 - [x] Share checkpoints on Hugging Face.
-- [ ] Add hosted demos (GIF or MP4) inside `assets/demos/` or via Git LFS.  
+- [ ] Create an interactive presentation.
 - [ ] Publish a Hugging Face Space for browser-based manipulation.
 
-## Quick Start
-### Environment Setup
+## ⚡ Quick Start
+### 🧩 Environment Setup
 We ship a full Conda specification in `environment.yml` (environment name: `dragmesh`). It targets Python 3.10, CUDA 12.1, and PyTorch 2.4.1. Create or update via:
 ```bash
 conda env create -f environment.yml
@@ -53,7 +50,7 @@ conda env update -f environment.yml --prune
 
 > The spec already installs trimesh, pyrender, pygltflib, viser, Objaverse, SAPIEN, pytorch3d, and tiny-cuda-nn. If you prefer a minimal setup, install those packages manually before running the scripts.
 
-### Native Extensions
+### 🛠️ Native Extensions
 Chamfer distance kernels are required for the VAE loss. Clone and build the upstream project:
 ```bash
 git clone https://github.com/ThibaultGROUEIX/ChamferDistancePytorch.git
@@ -62,11 +59,10 @@ python setup.py install
 cd ..
 ```
 
-## Data Preparation (GAPartNet)
-1. Visit https://pku-epic.github.io/GAPartNet/ and download the articulated CAD assets for the categories listed in `config/category_split_v2.json`.  
+## 📦 Data Preparation (GAPartNet)
+1. Visit https://pku-epic.github.io/GAPartNet/ and download the articulated assets for the categories listed in `config/category_split_v2.json`.  
 2. Arrange files so that each object folder contains `mobility_annotation_gapartnet.urdf`, `meta.json`, and textured meshes (`*.obj`). Example:
    ```
-   The snippet above mirrors the output of a Windows `tree /F` (or `tree -a` on Unix) command, so you can run `tree data/gapartnet/<object_id> /F` to verify your structure matches.
    data/gapartnet/<object_id>/
      |- mobility_annotation_gapartnet.urdf
      |- meta.json
@@ -84,7 +80,7 @@ cd ..
    ```
 4. Use `utils/balanced_dataset_utils.get_motion_type_weights` with `WeightedRandomSampler` if you need balanced revolute/prismatic sampling.
 
-## Training
+## 🧠 Training
 ### Dual Quaternion VAE
 ```bash
 python scripts/train_vae_v2.py \
@@ -119,7 +115,7 @@ python scripts/train_predictor.py \
 
 Both scripts log to TensorBoard and optionally Weights & Biases. Check `modules/loss.py` and `modules/predictor_loss.py` for objective details.
 
-## Inference
+## 🧪 Inference
 ### Batch Sweep (dataset mode)
 ```bash
 python inference_animation.py \
@@ -130,7 +126,7 @@ python inference_animation.py \
   --num_samples 5 \
   --num_frames 16
 ```
-Outputs MP4, GIF, and animated GLB per object. Existing examples can be found at `C:\Users\Plote\Desktop\results_deterministic`. If you plan to process a large dataset using dual-quaternion ground truth (no manual drags), prefer this script because running only KPP predictions frame-by-frame may introduce cumulative drift that eventually breaks physical alignment.
+Outputs MP4, GIF, and animated GLB per object. If you plan to process a large dataset using dual-quaternion ground truth (no manual drags), prefer this script because running only KPP predictions frame-by-frame may introduce cumulative drift that eventually breaks physical alignment.
 
 ### Custom Mesh Manipulation (manual input)
 ```bash
@@ -148,30 +144,20 @@ python inference_pipeline.py \
 ```
 Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manual_joint_type revolute` or `--manual_joint_type prismatic` to force a specific motion family when needed. If you omit the manual override, the pipeline first trusts KPP-Net and, when `--llm_endpoint` + `--llm_api_key` are provided, backs off to the LLM-based classifier described in `inference_pipeline.py`. Outputs share the same MP4/GIF/GLB format as the batch pipeline.
 
-## Visualization
+## 👀 Visualization
 - GIF/MP4 exports rely on `pyrender` and `imageio`. For headless servers, set `PYOPENGL_PLATFORM=osmesa`.  
 - `inference_animation.py` also exports animated GLB files for direct use in GLTF viewers.  
 - For additional visualization tooling (e.g., rerun or Blender scripts), see `inference_animation.py` and `inference_pipeline.py`.
 
-## Case Study
+## 👩‍💻 Case Study
 | Scenario | Description |
 | --- | --- |
 | Drawer opening | Translational motion predicted entirely from drag cues. |
 | Microwave door | Revolute joint inference with FiLM conditioned motion generation. |
 | Bucket handle | High curvature rotations showing the benefit of dual quaternions. |
 
-Upload representative MP4 clips from `C:\Users\Plote\Desktop\results_deterministic` to `assets/demos/` (or host via Hugging Face) and link them here.
+## 🎬 Demo Gallery
 
-## Demo Gallery
-> These MP4 files currently live outside the repository at `C:\Users\Plote\Desktop\results_deterministic\results_deterministic`. Copy the ones you want to share into `assets/demos/<motion_type>/<object_id>.mp4` (or upload them to Hugging Face) and update the links below.
-
-| Motion bucket | Example files (relative to the archive root) |
-| --- | --- |
-| translational drag demos | `1\100021\predicted_z_0.mp4`, `1\100040\predicted_z_0.mp4`, `1\100051\predicted_z_0.mp4`, `1\102996\predicted_z_0.mp4`, `1\12085\predicted_z_0.mp4`, `1\13153\predicted_z_0.mp4`, `1\22508\predicted_z_0.mp4`, `1\22692\predicted_z_0.mp4`, ... |
-|rotational drag demos | `2\100129\predicted_z_0.mp4`, `2\100214\predicted_z_0.mp4`, `2\100221\predicted_z_0.mp4`, `2\100224\predicted_z_0.mp4`, `2\100234\predicted_z_0.mp4`, `2\10040\predicted_z_0.mp4`, `2\100426\predicted_z_0.mp4`, `2\100431\predicted_z_0.mp4`, ... |
-| self-spin / free-spin demos | `3\102472\predicted_z_0.mp4`, `3\102523\predicted_z_0.mp4`, `3\102528\predicted_z_0.mp4`, `3\102831\predicted_z_0.mp4`, `3\102873\predicted_z_0.mp4`, `3\102882\predicted_z_0.mp4`, `3\102892\predicted_z_0.mp4`, `3\103041\predicted_z_0.mp4`, ... |
-
-### Sample demos (hosted on GitHub attachments)
 **Translational drags**
 | | | |
 | --- | --- | --- |
@@ -190,7 +176,7 @@ Upload representative MP4 clips from `C:\Users\Plote\Desktop\results_determinist
 | <video src="https://github.com/user-attachments/assets/91d2e288-8f87-40be-8332-018a13ab6e8e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/b8af10dd-d6cf-4360-bd63-3a322be3a505" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/0a4bcdce-3c31-4d29-82ac-fc693680dce2" controls width="260"></video> |
 | <video src="https://github.com/user-attachments/assets/7332d57e-4a47-45d6-b1a0-7d353188533e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/0d06f7f2-2e42-4358-8975-00ea32a9d70e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/07acbc6d-7a95-4ed2-9495-6eef86dc7b73" controls width="260"></video> |
 
-## Repository Tour
+## 🗂️ Repository Tour
 | Path | Content |
 | --- | --- |
 | `modules/model_v2.py` | Dual Quaternion VAE (encoder, decoder, FiLM Transformer). |
@@ -201,7 +187,7 @@ Upload representative MP4 clips from `C:\Users\Plote\Desktop\results_determinist
 | `inference_animation*.py`, `inference_pipeline.py` | Inference pipelines (batch and interactive). |
 | `ChamferDistancePytorch/` | CUDA kernels for Chamfer distance and auxiliary metrics. |
 
-### Project Tree (annotated)
+### 🌳 Project Tree (annotated)
 ```
 DragMesh/
 ├── assets/                      # Logos, teaser figures, future demo media
@@ -237,10 +223,6 @@ checkpoints/
 ├── README.md                     
 ```
 
-## Acknowledgement
+## 🙏 Acknowledgement
 We thank the GAPartNet team for the articulated dataset, and upstream projects such as ChamferDistancePytorch, Objaverse, SAPIEN, and PyTorch3D for their open-source contributions.
 
-## Results & Assets Checklist
-1. **Logo:** `assets/dragmesh_logo.png` is already linked in the README header.  
-2. **Demo videos:** Representative translational / rotational / self-spin clips are embedded via GitHub attachments (see “Sample demos”).  
-3. **Datasets:** GAPartNet download + LMDB preparation are fully documented; add new entries here only if additional datasets are introduced later.
