@@ -216,7 +216,6 @@ checkpoints/
 ├── results_deterministic/        # Placeholder for inference outputs (MP4/GIF/GLB)
 ├── inference_animation.py        # Batch evaluation + GLB export
 ├── inference_animation_kpp.py    # Dataset-driven animation tests (legacy interface)
-├── inference_glb.py              # Helper for converting trajectories to GLB
 ├── inference_pipeline.py         # Interactive mesh manipulation pipeline
 ├── environment.yml               # Conda environment (name: dragmesh)
 ├── README.md                     
@@ -225,3 +224,6 @@ checkpoints/
 ## 🙏 Acknowledgement
 We thank the GAPartNet team for the articulated dataset, and upstream projects such as ChamferDistancePytorch, Objaverse, SAPIEN, and PyTorch3D for their open-source contributions.
 
+## 🌟 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=AIGeeksGroup/DragMesh&type=Date)](https://www.star-history.com/#AIGeeksGroup/DragMesh&Date)
