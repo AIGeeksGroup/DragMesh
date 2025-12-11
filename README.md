@@ -6,7 +6,7 @@ Official repository for the paper **"DragMesh: Interactive 3D Generation Made Ea
 > 
 > \*Equal contribution. †Project lead. <sup>#</sup>Corresponding author. 
 > 
-> [Paper (PDF)]() | [Project Website](https://aigeeksgroup.github.io/DragMesh) | [Hugging Face Models](https://huggingface.co/AIGeeksGroup/DragMesh)
+> [Paper](https://www.arxiv.org/abs/2512.06424) | [Project Website](https://aigeeksgroup.github.io/DragMesh) | [Hugging Face Models](https://huggingface.co/AIGeeksGroup/DragMesh)
 
 > [!NOTE]  
 >  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
@@ -16,7 +16,12 @@ https://github.com/user-attachments/assets/cec1da8b-70eb-41b8-88a4-27bbbaab7fc8
 ## 🧾 Citation
 If you find DragMesh helpful, please cite:
 ```bibtex
-
+@article{zhang2025dragmesh,
+  title={DragMesh: Interactive 3D Generation Made Easy},
+  author={Zhang, Tianshan and Zhang, Zeyu and Tang, Hao},
+  journal={arXiv preprint arXiv:2512.06424},
+  year={2025}
+}
 ```
 
 ---
