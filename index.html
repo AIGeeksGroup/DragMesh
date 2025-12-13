@@ -403,6 +403,15 @@
                     </div>
                 </div>
             </div>
+
+            <script>
+                document.addEventListener('DOMContentLoaded', () => {
+                    // Ensure grid animations start automatically
+                    document.querySelectorAll('.mesh-grid model-viewer').forEach(mv => {
+                        mv.setAttribute('autoplay', '');
+                    });
+                });
+            </script>
             
             <br>
             <br>
