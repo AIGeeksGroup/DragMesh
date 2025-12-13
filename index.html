@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="en">
+    <meta charset="UTF-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+
+    <title>DragMesh: Interactive 3D Generation Made Easy</title>
+
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="img/dragmesh_logo.png">
+    <!-- or .ico if you have it: <link rel="icon" href="images/favicon.ico"> -->
+
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.8.0/codemirror.min.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/fontawesome.all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+
+    <!-- Google tag (gtag.js) -->
+    <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=G-8ZERS5BVPS"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+        gtag('config', 'G-8ZERS5BVPS');
+    </script> -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.8.0/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.5.3/clipboard.min.js"></script>
+    <script type="text/javascript" async
+        src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+        </script>
+    <script defer src="js/fontawesome.all.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.5.0/Chart.min.js"></script>
+
+    <script src="js/app.js"></script>
+    <script src="js/synced_video_selector.js"></script>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.1.1/model-viewer.min.js"></script>
+
+    <script type="module">
+        import { createSplatView, setSplatScene, setupCarousel } from "./js/splats.js"
+        setupCarousel(createSplatView("splat-picker"), document.querySelector("#splat-carousel"));
+    </script>
+    <style>
+        .final-element {
+            white-space: nowrap;
+        }
+
+        .mesh-grid .mesh-card {
+            border: 1px solid #d6e4ff;
+            border-radius: 12px;
+            overflow: hidden;
+            background-color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        }
+
+        .mesh-card model-viewer {
+            width: 100%;
+            height: 260px;
+            background: #ffffff;
+            --poster-color: #ffffff;
+            --progress-bar-color: #2563eb;
+            --progress-bar-height: 3px;
+        }
+
+        .mesh-caption {
+            background-color: #eef6ff;
+            padding: 14px;
+            font-size: 0.95rem;
+            color: #123769;
+            line-height: 1.4;
+        }
+
+        .qa-row {
+            max-width: 70%;
+            margin: 0 auto 2rem auto;
+        }
+
+        .qa-text {
+            background-color: #eef6ff;
+            border-radius: 12px;
+            padding: 20px;
+            color: #123769;
+            height: 100%;
+            display: flex;
+            align-items: flex-start;
+            text-align: left;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+        }
+
+        @media (min-width: 768px) {
+            .qa-mesh-col {
+                flex: 0 0 30%;
+                max-width: 30%;
+            }
+
+            .qa-text-col {
+                flex: 0 0 70%;
+                max-width: 70%;
+            }
+        }
+
+        .vaseeval-wrapper {
+            max-width: 70%;
+            margin: 0 auto 3rem auto;
+        }
+
+        .vaseeval-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .vaseeval-label {
+            flex: 0 0 110px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            color: #123769;
+        }
+
+        .vaseeval-grid {
+            flex: 1;
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+
+        .vaseeval-grid model-viewer {
+            width: 100%;
+            height: 220px;
+            border: 1px solid #d6e4ff;
+            border-radius: 12px;
+            background: #ffffff;
+            --poster-color: #ffffff;
+            --progress-bar-color: #2563eb;
+            --progress-bar-height: 3px;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+        }
+
+        @media (max-width: 991px) {
+            .vaseeval-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .vaseeval-label {
+                flex: none;
+            }
+
+            .vaseeval-grid {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body style="padding: 5%; padding-top: min(15px, 5%); padding-bottom: min(5px, 5%); width: 100%">
+    <div class="container-lg text-center" style="max-width: 1500px; margin: auto;" id="main">
+        <header role="banner">
+            <!-- <div class="container" id="main"> -->
+            <div class="row">
+                <h2 class="col-md-12 text-center" style="padding-top: 10px">
+                    <b>DragMesh:</b> Interactive 3D Generation Made Easy</br>
+                </h2>
+                <br><br><br>
+                <!-- <h4 class="col-md-12 text-center" style="padding-top: 10px; padding-bottom: 10px;">
+                    ICML 2025
+                </h4> -->
+            </div>
+            <div class="row text-center">
+                <div class="col-md-3">
+                </div>
+                <div class="container-fluid text-center">
+                    <ul class="list-inline" style="white-space: nowrap; margin:0px 0px 0px 0px;">
+                        <li><a style="font-size: calc(min(3vw, 18px))" href="https://neptune-t.github.io/aca-web-html/">Tianshan Zhang<sup>*</sup></a></li>
+                        <li><a style="font-size: calc(min(3vw, 18px))" href="https://steve-zeyu-zhang.github.io/">Zeyu Zhang<sup>*†</sup></a></li>
+                        <li><a style="font-size: calc(min(3vw, 18px))" href="https://ha0tang.github.io/">Hao Tang<sup>‡</sup></a></li>
+                    </ul>
+                </div>
+                <div class="col-md-12 text-center" style="font-size: calc(min(3vw, 16px))">
+                    Peking University &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                </div>
+                <div class="col-md-12 text-center" style="font-size: calc(min(3vw, 15px))">
+                    <sup>*</sup>Equal contribution. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                    <sup>†</sup>Project lead. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                    <sup>‡</sup>Corresponding author. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                </div>
+            <br>
+            <div class="row text-center">
+                <span class="link-block" style="padding-top: 10px; padding-bottom: 10px">
+                    <a href="https://arxiv.org/abs/2512.06424" class="external-link button is-normal is-rounded is-dark"
+                        style="width: 80px; font-size: 15px; text-align: center;">
+                        <span class="icon">
+                            <i class="ai ai-arxiv"></i>
+                        </span>
+                        <span>Paper</span>
+                    </a>
+                    &nbsp;&nbsp;
+                    
+                    <a href="https://github.com/AIGeeksGroup/DragMesh" class="external-link button is-normal is-rounded is-dark"
+                        style="width: 80px; font-size: 15px; text-align: center;">
+                        <span class="icon">
+                            <i class="fas fa-code"></i>
+                        </span>
+                        <span>Code</span>
+                    </a>
+                    <!-- &nbsp;&nbsp;
+                    <a href="https://huggingface.co/datasets/AIGeeksGroup/Drag" class="external-link button is-normal is-rounded is-dark"
+                        style="width: 80px; font-size: 15px; text-align: center;">
+                        <span class="icon">
+                            <i class="fa fa-database"></i>
+                        </span>
+                        <span>Data</span>
+                    </a> -->
+                    &nbsp;&nbsp;
+                    <a href="https://huggingface.co/AIGeeksGroup/DragMesh" class="external-link button is-normal is-rounded is-dark"
+                        style="width: 80px; font-size: 15px; text-align: center;">
+                        <span class="icon">
+                            <i class="fa fa-play"></i>
+                        </span>
+                        <span>Model</span>
+                    </a>
+                </span>
+            </div>
+        </header>
+        <br>
+
+        <main role="main">
+            <div class="row">
+                <div class="col-md-8 offset-md-2 rounded"
+                    style="text-align: center; padding: 10px; padding-bottom: 0px; background-color: #eef6ff;">
+                    <h6 style="text-align: center"><strong>TL;DR: </strong>DragMesh enables real time, physically valid 3D object articulation by decoupling kinematic reasoning from motion generation and producing plausible motions via a dual quaternion based generative model.</h6>
+                </div>
+            </div>
+            <br><br>
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <video id="co3d-grid"  width="70%" autoplay loop muted controls playsinline>
+                        <source src="videos/teaser.mp4" type="video/mp4"></source>
+                    </video>
+                </div>
+            </div>
+            <br><br>
+
+
+            <br>
+
+            <div class="row justify-content-center">
+                <div class="col-lg-8" style="max-width: 70%;">
+                    <h3> 4D Visualization </h3>
+                </div>
+            </div>
+            <div class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-4 justify-content-center mesh-grid mt-2" style="max-width: 70%; margin: 0 auto;">
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/10040.glb"
+                            alt="Rotation 1"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/32086.glb"
+                            alt="Rotation 2"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/41003.glb"
+                            alt="Rotation 3"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/45087.glb"
+                            alt="Rotation 4"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/100129.glb"
+                            alt="Rotation 5"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/100221.glb"
+                            alt="Rotation 6"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/100234.glb"
+                            alt="Rotation 7"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/rotation/100431.glb"
+                            alt="Rotation 8"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/spin/102528.glb"
+                            alt="Spin 1"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/spin/103048.glb"
+                            alt="Spin 2"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/spin/103482.glb"
+                            alt="Spin 3"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/spin/103514.glb"
+                            alt="Spin 4"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/12085.glb"
+                            alt="Translation 1"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/22508.glb"
+                            alt="Translation 2"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/27044.glb"
+                            alt="Translation 3"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/29921.glb"
+                            alt="Translation 4"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/32601.glb"
+                            alt="Translation 5"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/34178.glb"
+                            alt="Translation 6"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/100051.glb"
+                            alt="Translation 7"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+                <div class="col">
+                    <div class="mesh-card">
+                        <model-viewer src="results_deterministic/translation/102996.glb"
+                            alt="Translation 8"
+                            camera-controls auto-rotate ar shadow-intensity="1.2" touch-action="pan-y"></model-viewer>
+                    </div>
+                </div>
+            </div>
+            
+            <br>
+            <br>
+            <br>
+            <br>    
+
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <h3> Efficiency </h3><br>
+                    <image width=70% src="img/3-1.png"
+                        alt="You browser does not support this image."></image>
+                    
+                    <br><br>
+                    <p figcaption class="text-justify margin-5" style="text-align: left;">
+                       Bubble size indicates parameter count (core module only), color denotes generalization capability (Purple: generalizable; Orange: per-object training required). Our method achieves generalization with significantly lower computational cost than existing generalizable approaches.
+                </div>
+            </div>
+
+
+
+            <br>
+            <br>
+            <br>
+            <br>    
+
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <h3> DragMesh Pipeline </h3><br>
+                    <image width=100% src="img/6-1.png"
+                        alt="You browser does not support this image."></image>
+                    
+                    <br><br>
+                    <p figcaption class="text-justify margin-5" style="text-align: left;">
+                       The DragMesh pipeline fuses point cloud, joint, and drag inputs through a VAE and Transformer architecture to predict a physically-corrected dual quaternion.
+                    </p>
+                </div>
+            </div>
+            
+
+
+            <br>
+            <br>
+            <br>
+            <br>    
+
+            <div class="row">
+                <div class="col-md-8 offset-md-2">
+                    <h3> DregMesh Inference Pipeline </h3><br>
+                    <image width=100% src="img/pipeline2-1.png"
+                        alt="You browser does not support this image."></image>
+                    
+                    <br><br>
+                    <p figcaption class="text-justify margin-5" style="text-align: left;">
+                       The DragMesh Annotation-Free Inference Pipeline. Given a raw mesh and drag, a segmentation model identifies the movable part while a VLM predicts the joint type. Our KPP-Net then regresses the precise axis and origin, enabling the final DragMesh model to generate the Dual Quaternion animation.
+                </div>
+            </div>
+            
+            
+            <!-- <div class="col-md-8 offset-md-2 text-start" style="padding-top: 4em;"></div>
+                <h4>
+                    Acknowledgements
+                </h4>
+
+                <p class="text-justify" style="text-align: middle;">
+                    We thank the authors of 
+                    
+                </p>
+            </div> -->
+
+            <br><br><br>
+            <div class="row justify-content-center">
+                <div class="col-md-8 center text-start">
+                    <label style="display: inline" for="bibtex">
+                        <h4 style="text-align: center">BibTeX </h4>
+                    </label>
+                    <textarea id="bibtex" class="form-control" readonly>
+@article{zhang2025dragmesh,
+  title={DragMesh: Interactive 3D Generation Made Easy},
+  author={Zhang, Tianshan and Zhang, Zeyu and Tang, Hao},
+  journal={arXiv preprint arXiv:2512.06424},
+  year={2025}
+}
+                        </textarea>
+                </div>
+            </div> 
+
+        </main>
+
+        <br><br>
+        <hr style="width: 70%; text-align: center; margin-left: auto; margin-right: auto;">
+        <footer>
+            <div class="row">
+                <div class="col-md-8 offset-md-2 text-start">
+
+                    <p class="text-justify" style="text-align: center;">
+                        <i>
+                            DragMesh: Interactive 3D Generation Made Easy
+                        </i>
+                    </p>
+                </div>
+            </div>
+
+        </footer>
+    </div>
+</body>
+
+</html>
