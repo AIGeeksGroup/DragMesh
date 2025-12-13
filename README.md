@@ -170,20 +170,19 @@ Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manua
 **Translational drags**
 | | | |
 | --- | --- | --- |
-| <video src="https://github.com/user-attachments/assets/18def78b-8e90-45c1-8f87-11a07af8aab2" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/3bc592cb-b9c7-4416-9784-8641b6100767" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/f3364136-2e41-459b-82b6-b3a6787c9390" controls width="260"></video> |
-| <video src="https://github.com/user-attachments/assets/ee4d749e-00fa-4de8-80c0-4c2a30e4f308" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/f082760d-9f20-4819-b7fe-6f45ae501103" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/7efac575-19e4-4265-8f77-e7cff4fdad0f" controls width="260"></video> |
+| <video src="https://github.com/user-attachments/assets/b5f1c6e1-4273-4a5e-9c89-ba87942140be" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/3114a80f-f7d1-4e8f-ad99-232dc679725a" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/c6103c82-e2e9-4d52-8525-87923b66d191" controls width="260"></video> |
+| <video src="https://github.com/user-attachments/assets/f0cad844-e399-46f4-954a-4ef9dea8f6bb" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/f5cfb154-3a98-4078-81da-fc57d1356a1c" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/f2c7c1fe-51bf-4744-a87a-1886f3f89350" controls width="260"></video> |
 
 **Rotational drags**
 | | | |
 | --- | --- | --- |
-| <video src="https://github.com/user-attachments/assets/883c5a47-4c7a-4cfd-9df4-ff9b278e1e2b" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/d4608ba9-6055-4a5f-9f63-e8c427c64301" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/4263d858-c470-4e2d-b32b-b3e2570916ab" controls width="260"></video> |
-| <video src="https://github.com/user-attachments/assets/25ed4dc5-40f7-46c8-809f-d921788187ac" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/d7c8682b-8d05-42f8-80e8-6cfee6ed09f9" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/d976a523-c07d-44d0-85ea-9b4da1b57b94" controls width="260"></video> |
+| <video src="https://github.com/user-attachments/assets/ad4ee5e4-d634-4063-8201-a883c62c4053" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/284b4ce6-39c6-4c14-ab60-4465b41f6193" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/44dfbfc0-ca4c-475c-abcb-060210a3dc91" controls width="260"></video> |
+| <video src="https://github.com/user-attachments/assets/07915c65-a88c-42b0-87d6-9d398d8d0423" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/5d5e2d2e-0d12-421e-a435-aef0f4167c4d" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/d14b2c4c-9858-4279-b909-3eb9649595da" controls width="260"></video> |
 
 **Self-spin / free-spin**
 | | | |
 | --- | --- | --- |
-| <video src="https://github.com/user-attachments/assets/91d2e288-8f87-40be-8332-018a13ab6e8e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/b8af10dd-d6cf-4360-bd63-3a322be3a505" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/0a4bcdce-3c31-4d29-82ac-fc693680dce2" controls width="260"></video> |
-| <video src="https://github.com/user-attachments/assets/7332d57e-4a47-45d6-b1a0-7d353188533e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/0d06f7f2-2e42-4358-8975-00ea32a9d70e" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/07acbc6d-7a95-4ed2-9495-6eef86dc7b73" controls width="260"></video> |
+| <video src="https://github.com/user-attachments/assets/b255376d-19f4-47c2-b1de-5b8a1c1c39f0" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/b46ac7ff-d83f-43c7-a005-53c77526b3fc" controls width="260"></video> | <video src="https://github.com/user-attachments/assets/610eaab0-cdd0-4206-9cce-f160ee13d199" controls width="260"></video> |
 
 ## 🗂️ Repository Tour
 | Path | Content |
