@@ -7,7 +7,7 @@ Official repository for the paper
 > 
 > \*Equal contribution. †Project lead. <sup>#</sup>Corresponding author. 
 > 
-> ### [Paper](https://www.arxiv.org/abs/2512.06424) | [Website](https://aigeeksgroup.github.io/DragMesh) | [Models](https://huggingface.co/AIGeeksGroup/DragMesh)
+> ### [Paper](https://www.arxiv.org/abs/2512.06424) | [Website](https://aigeeksgroup.github.io/DragMesh) | [Models](https://huggingface.co/AIGeeksGroup/DragMesh) | [HF Paper](https://huggingface.co/papers/2512.06424)
 
 > [!NOTE]  
 >  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
