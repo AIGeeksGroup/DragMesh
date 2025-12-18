@@ -49,18 +49,19 @@ While generative models have excelled at creating static 3D content, the pursuit
 
 ## ⚡ Quick Start
 ### 🧩 Environment Setup
-We ship a full Conda specification in `environment.yml` (environment name: `dragmesh`). It targets Python 3.10, CUDA 12.1, and PyTorch 2.4.1. Create or update via:
+It targets Python 3.10, CUDA 12.1, and PyTorch 2.4.1 :
+
 ```bash
 conda env create -f environment.yml
 conda activate dragmesh
-# or update an existing env
 conda env update -f environment.yml --prune
 ```
 
-> The spec already installs trimesh, pyrender, pygltflib, viser, Objaverse, SAPIEN, pytorch3d, and tiny-cuda-nn. If you prefer a minimal setup, install those packages manually before running the scripts.
+The spec already installs trimesh, pyrender, pygltflib, viser, Objaverse, SAPIEN, pytorch3d, and tiny-cuda-nn.
 
 ### 🛠️ Native Extensions
 Chamfer distance kernels are required for the VAE loss. Clone and build the upstream project:
+
 ```bash
 git clone https://github.com/ThibaultGROUEIX/ChamferDistancePytorch.git
 cd ChamferDistancePytorch
@@ -154,9 +155,25 @@ python inference_pipeline.py \
 Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manual_joint_type revolute` or `--manual_joint_type prismatic` to force a specific motion family when needed. If you omit the manual override, the pipeline first trusts KPP-Net and, when `--llm_endpoint` + `--llm_api_key` are provided, backs off to the LLM-based classifier described in `inference_pipeline.py`. Outputs share the same MP4/GIF/GLB format as the batch pipeline.
 
 ## 👀 Visualization
-- GIF/MP4 exports rely on `pyrender` and `imageio`. For headless servers, set `PYOPENGL_PLATFORM=osmesa`.  
+- GIF/MP4 导出依赖 `pyrender` + `imageio`。无显示器/远程服务器建议设置：`PYOPENGL_PLATFORM=osmesa`。  
 - `inference_animation.py` also exports animated GLB files for direct use in GLTF viewers.  
 - For additional visualization tooling (e.g., rerun or Blender scripts), see `inference_animation.py` and `inference_pipeline.py`.
+
+## 🧯 常见问题（新机器最容易踩的坑）
+
+### 1) `nvcc: command not found`
+- **原因**：只有 NVIDIA 驱动不够，编译 ChamferDistancePytorch 需要 CUDA Toolkit（nvcc）。
+- **解决**：
+  - 安装 CUDA Toolkit 后再编译扩展。
+
+### 2) 运行可视化时报 OpenGL/egl/osmesa 相关错误
+- **解决**：无头环境先试：
+  - `export PYOPENGL_PLATFORM=osmesa`
+
+### 3) 训练脚本里 `--use_tensorboard/--use_wandb` 装不装？
+- **结论**：都是可选项。
+  - 不装 `tensorboard/wandb` 也能训练，只是少日志。
+  - 需要的话：`pip install -r requirements.txt`
 
 ## 👩‍💻 Case Study
 | Scenario | Description |
