@@ -7,7 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Optional
-import chamfer3D.dist_chamfer_3D
+try:
+    import chamfer3D.dist_chamfer_3D  # type: ignore
+except Exception:
+    chamfer3D = None
 from modules.dual_quaternion import (
     dual_quaternion_norm, quaternion_mul, 
     quaternion_conjugate, quaternion_to_matrix
@@ -41,11 +44,30 @@ def _chamfer_distance_loss(pred_points, gt_points, mask=None):
     
     pred_flat = pred_points.reshape(B * T, N, 3)
     gt_flat = gt_points.reshape(B * T, N, 3)
-    
-    if chamfer_dist_calculator is None:
-        chamfer_dist_calculator = chamfer3D.dist_chamfer_3D.chamfer_3DDist()
-        
-    dist1, dist2, _, _ = chamfer_dist_calculator(pred_flat, gt_flat)
+
+    # Fast path: CUDA chamfer (ChamferDistancePytorch)
+    if chamfer3D is not None:
+        if chamfer_dist_calculator is None:
+            chamfer_dist_calculator = chamfer3D.dist_chamfer_3D.chamfer_3DDist()
+        dist1, dist2, _, _ = chamfer_dist_calculator(pred_flat, gt_flat)
+    else:
+        # Fallback: pure PyTorch chamfer (O(N^2), slow but portable).
+        # IMPORTANT: avoid materializing [BT, N, N] for N=4096 (can OOM).
+        chunk = 512
+
+        dist1_chunks = []
+        for s in range(0, N, chunk):
+            e = min(N, s + chunk)
+            d = torch.cdist(pred_flat[:, s:e, :], gt_flat, p=2)  # [BT, e-s, N]
+            dist1_chunks.append((d ** 2).min(dim=2).values)
+        dist1 = torch.cat(dist1_chunks, dim=1)  # [BT, N]
+
+        dist2_chunks = []
+        for s in range(0, N, chunk):
+            e = min(N, s + chunk)
+            d = torch.cdist(gt_flat[:, s:e, :], pred_flat, p=2)  # [BT, e-s, N]
+            dist2_chunks.append((d ** 2).min(dim=2).values)
+        dist2 = torch.cat(dist2_chunks, dim=1)  # [BT, N]
     
     if mask is not None:
         mask_flat = mask.unsqueeze(1).expand(-1, T, -1).reshape(B * T, N).float()
