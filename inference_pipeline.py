@@ -10,14 +10,12 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 import trimesh
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from modules.model_v2 import DualQuaternionVAE
 from modules.predictor import KeypointPredictor
-from modules.dual_quaternion import quaternion_conjugate, quaternion_multiply
 from inference_animation import run_animation_from_sample
 
 try:
@@ -502,8 +500,12 @@ def load_kpp_model(checkpoint_path: str, device: torch.device) -> KeypointPredic
         use_mask=config.get('use_mask', True),
         use_drag=config.get('use_drag', True)
     ).to(device)
-    state = {k.replace('module.', ''): v for k, v in checkpoint['model_state_dict'].items()}
-    kpp_model.load_state_dict(state, strict=True)
+    state = {k.replace('module.', ''): v for k, v in checkpoint.get('model_state_dict', {}).items()}
+    try:
+        kpp_model.load_state_dict(state, strict=True)
+    except RuntimeError as exc:
+        print(f"[WARN] KPP strict load failed, fallback to strict=False: {exc}")
+        kpp_model.load_state_dict(state, strict=False)
     kpp_model.eval()
     return kpp_model
 
@@ -519,8 +521,12 @@ def load_vae_model(checkpoint_path: str, device: torch.device, override_frames: 
         transformer_layers=config.get('transformer_layers', 4),
         transformer_heads=config.get('transformer_heads', 8)
     ).to(device)
-    state = {k.replace('module.', ''): v for k, v in checkpoint['model_state_dict'].items()}
-    vae_model.load_state_dict(state, strict=True)
+    state = {k.replace('module.', ''): v for k, v in checkpoint.get('model_state_dict', {}).items()}
+    try:
+        vae_model.load_state_dict(state, strict=True)
+    except RuntimeError as exc:
+        print(f"[WARN] VAE strict load failed, fallback to strict=False: {exc}")
+        vae_model.load_state_dict(state, strict=False)
     vae_model.eval()
     return vae_model, num_frames
 
@@ -611,6 +617,9 @@ def parse_args():
     parser.add_argument('--num_points', type=int, default=4096)
     parser.add_argument('--num_samples', type=int, default=3)
     parser.add_argument('--num_frames', type=int, default=None)
+    parser.add_argument('--fps', type=float, default=5.0, help='animation playback fps (smaller = slower)')
+    parser.add_argument('--loop_mode', type=str, default='pingpong', choices=['once', 'pingpong'],
+                        help='once: 0->1; pingpong: 0->1->0 (better for default looping players)')
 
     parser.add_argument('--drag_point', type=parse_vec3, default=None,
                         help='Manual drag point (x,y,z).')
@@ -767,7 +776,9 @@ def main():
         num_frames=num_frames,
         num_samples_to_gen=args.num_samples,
         force_rotation=False,
-        include_groundtruth=False
+        include_groundtruth=False,
+        fps=args.fps,
+        loop_mode=args.loop_mode
     )
 
 
