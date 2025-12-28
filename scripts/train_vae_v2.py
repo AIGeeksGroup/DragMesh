@@ -34,14 +34,15 @@ def custom_collate_fn(batch):
 def train_epoch(model, dataloader, optimizer, device, 
                 kl_weight, cd_weight, mesh_recon_weight, quat_recon_weight,
                 constraint_weight, qd_zero_weight, qr_identity_weight,
-                free_bits, epoch):
+                direction_weight, free_bits, epoch):
 
     model.train()
     
+    # Initialize loss meters (including direction loss 'dir').
     losses = {
         'total': 0, 'mesh_recon': 0, 'quat_recon': 0, 'recon': 0,
         'cd': 0, 'constraint': 0, 'qd_zero': 0, 'qr_identity': 0,
-        'static': 0, 'hinge': 0, 'kl': 0
+        'static': 0, 'hinge': 0, 'kl': 0, 'dir': 0
     }
     num_batches = 0
 
@@ -50,7 +51,6 @@ def train_epoch(model, dataloader, optimizer, device,
         if batch is None: 
             continue
         
-
         mesh = batch['initial_mesh'].to(device)
         drag_point = batch['drag_point'].to(device)
         drag_vector = batch['drag_vector'].to(device)
@@ -61,7 +61,7 @@ def train_epoch(model, dataloader, optimizer, device,
         joint_origin = batch['joint_origin'].to(device)
         part_mask = batch['part_mask'].to(device)
         
-
+        # Optional fields (may be absent depending on dataset).
         rotation_direction = batch.get('rotation_direction')
         if rotation_direction is not None:
             rotation_direction = rotation_direction.to(device)
@@ -74,30 +74,34 @@ def train_epoch(model, dataloader, optimizer, device,
         if drag_trajectory is not None:
             drag_trajectory = drag_trajectory.to(device)
 
+        # Forward pass (model_v2.forward must accept these optional arguments).
         pred_qr, pred_qd, mu, logvar = model(
             mesh, drag_point, drag_vector, joint_type, joint_axis, 
             joint_origin, part_mask, rotation_direction, trajectory_vectors,
             drag_trajectory 
         )
 
-
+        # Compute loss (including rotation direction consistency, if provided).
         loss_dict = enhanced_dualquat_vae_loss(
             pred_qr, pred_qd, qr_gt, qd_gt, mu, logvar,
             joint_type=joint_type, joint_axis=joint_axis, joint_origin=joint_origin,
             initial_mesh=mesh, part_mask=part_mask,
+            # New arguments
+            rotation_direction=rotation_direction,
+            direction_weight=direction_weight,
+            # Existing arguments
             kl_weight=kl_weight, cd_weight=cd_weight,
             mesh_recon_weight=mesh_recon_weight, quat_recon_weight=quat_recon_weight,
             constraint_weight=constraint_weight, qd_zero_weight=qd_zero_weight,
             qr_identity_weight=qr_identity_weight, free_bits=free_bits, 
         )
 
-
         optimizer.zero_grad()
         loss_dict['total_loss'].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         optimizer.step()
 
-
+        # Accumulate losses
         losses['total'] += loss_dict['total_loss'].item()
         losses['mesh_recon'] += loss_dict['mesh_recon_loss'].item()
         losses['quat_recon'] += (loss_dict['qr_recon_loss'].item() + 
@@ -110,14 +114,16 @@ def train_epoch(model, dataloader, optimizer, device,
         losses['static'] += loss_dict['static_loss'].item() 
         losses['hinge'] += loss_dict['hinge_loss'].item()   
         losses['kl'] += loss_dict['kl_loss'].item() 
+        losses['dir'] += loss_dict['direction_loss'].item()  # new
+        
         num_batches += 1
 
         amplitude = torch.norm(batch['drag_vector'], dim=1).mean().item()
         pbar.set_postfix({
             'loss': f'{loss_dict["total_loss"].item():.4f}',
             'mesh': f'{loss_dict["mesh_recon_loss"].item():.4f}',
-            'cd': f'{loss_dict["cd_loss"].item():.6f}',
-            'kl': f'{loss_dict["kl_loss"].item():.2f}',
+            'cd': f'{loss_dict["cd_loss"].item():.4f}',
+            'dir': f'{loss_dict["direction_loss"].item():.3f}',
             'amp': f'{amplitude:.2f}'
         })
 
@@ -130,13 +136,13 @@ def train_epoch(model, dataloader, optimizer, device,
 def validate(model, dataloader, device, 
              kl_weight, cd_weight, mesh_recon_weight, quat_recon_weight,
              constraint_weight, qd_zero_weight, qr_identity_weight,
-             free_bits):
+             direction_weight, free_bits):
     model.eval()
     
     losses = {
         'total': 0, 'mesh_recon': 0, 'quat_recon': 0, 'recon': 0,
         'cd': 0, 'constraint': 0, 'qd_zero': 0, 'qr_identity': 0,
-        'static': 0, 'hinge': 0, 'kl': 0
+        'static': 0, 'hinge': 0, 'kl': 0, 'dir': 0
     }
     num_batches = 0
     
@@ -175,6 +181,8 @@ def validate(model, dataloader, device,
                 pred_qr, pred_qd, qr_gt, qd_gt, mu, logvar,
                 joint_type=joint_type, joint_axis=joint_axis, joint_origin=joint_origin,
                 initial_mesh=mesh, part_mask=part_mask,
+                rotation_direction=rotation_direction,
+                direction_weight=direction_weight,
                 kl_weight=kl_weight, cd_weight=cd_weight,
                 mesh_recon_weight=mesh_recon_weight, quat_recon_weight=quat_recon_weight,
                 constraint_weight=constraint_weight, qd_zero_weight=qd_zero_weight,
@@ -193,6 +201,7 @@ def validate(model, dataloader, device,
             losses['static'] += loss_dict['static_loss'].item()
             losses['hinge'] += loss_dict['hinge_loss'].item()
             losses['kl'] += loss_dict['kl_loss'].item() 
+            losses['dir'] += loss_dict['direction_loss'].item()  # new
             num_batches += 1
 
     if num_batches == 0:
@@ -203,7 +212,7 @@ def validate(model, dataloader, device,
 def main(args):
     print("\n" + "="*70)
     print("Training DualQuaternionVAE")
-    print("    (KL, Recon, CD, Constraint)")
+    print("    (KL, Recon, CD, Constraint, Direction)")
     print("    LR ")
     print("="*70)
     
@@ -302,8 +311,6 @@ def main(args):
     total_params = count_parameters(model)
     print(f"Parameters: {total_params:,} (~{total_params/1e6:.2f}M)")
 
-
-
     optimizer = torch.optim.AdamW(
         model.parameters(), 
         lr=args.learning_rate, 
@@ -317,7 +324,6 @@ def main(args):
     start_epoch = 0
     best_val_total_loss = float('inf') 
     
-
     if args.resume and os.path.isfile(args.resume):
         print(f"\nLoading checkpoint: {args.resume}")
         checkpoint = torch.load(args.resume, map_location=device)
@@ -346,6 +352,7 @@ def main(args):
     print(f"  Mesh Recon:  {args.mesh_recon_weight:.1f}")
     print(f"  CD:          {args.cd_weight:.1f}")
     print(f"  Constraint:  {args.constraint_weight:.1f}")
+    print(f"  Direction:   {args.direction_weight:.1f}")
     print(f"  KL:          {args.kl_weight:.4f} (FreeBits: {args.free_bits:.1f})")
     print("="*70)
 
@@ -371,6 +378,7 @@ def main(args):
             kl_weight=current_kl, cd_weight=args.cd_weight, mesh_recon_weight=args.mesh_recon_weight,
             quat_recon_weight=args.quat_recon_weight, constraint_weight=args.constraint_weight,
             qd_zero_weight=args.qd_zero_weight, qr_identity_weight=args.qr_identity_weight,
+            direction_weight=args.direction_weight,  # pass through
             free_bits=args.free_bits, epoch=epoch
         )
 
@@ -379,26 +387,27 @@ def main(args):
             kl_weight=current_kl, cd_weight=args.cd_weight, mesh_recon_weight=args.mesh_recon_weight,
             quat_recon_weight=args.quat_recon_weight, constraint_weight=args.constraint_weight,
             qd_zero_weight=args.qd_zero_weight, qr_identity_weight=args.qr_identity_weight,
+            direction_weight=args.direction_weight,  # pass through
             free_bits=args.free_bits
         )
         
         scheduler.step(val_losses['total'])
 
         print(f"\nEpoch {epoch + 1} Summary:")
-        print(f"  Train - Total: {train_losses['total']:.4f} | Mesh: {train_losses['mesh_recon']:.4f} | CD: {train_losses['cd']:.6f} | KL: {train_losses['kl']:.2f}")
-        print(f"  Val   - Total: {val_losses['total']:.4f} | Mesh: {val_losses['mesh_recon']:.4f} | CD: {val_losses['cd']:.6f} | KL: {val_losses['kl']:.2f}")
+        print(f"  Train - Total: {train_losses['total']:.4f} | Mesh: {train_losses['mesh_recon']:.4f} | CD: {train_losses['cd']:.4f} | Dir: {train_losses['dir']:.3f} | KL: {train_losses['kl']:.2f}")
+        print(f"  Val   - Total: {val_losses['total']:.4f} | Mesh: {val_losses['mesh_recon']:.4f} | CD: {val_losses['cd']:.4f} | Dir: {val_losses['dir']:.3f} | KL: {val_losses['kl']:.2f}")
 
         logger.log_metrics({
             'total_loss': train_losses['total'], 'mesh_recon_loss': train_losses['mesh_recon'], 
             'cd_loss': train_losses['cd'], 'constraint_loss': train_losses['constraint'], 
-            'qr_identity_loss': train_losses['qr_identity'], 'kl_loss': train_losses['kl'],
+            'dir_loss': train_losses['dir'], 'kl_loss': train_losses['kl'],
             'lr': optimizer.param_groups[0]['lr']
         }, step=epoch + 1, prefix='train/')
 
         logger.log_metrics({
             'total_loss': val_losses['total'], 'mesh_recon_loss': val_losses['mesh_recon'], 
             'cd_loss': val_losses['cd'], 'constraint_loss': val_losses['constraint'], 
-            'qr_identity_loss': val_losses['qr_identity'], 'kl_loss': val_losses['kl']
+            'dir_loss': val_losses['dir'], 'kl_loss': val_losses['kl']
         }, step=epoch + 1, prefix='val/')
 
         train_history.append({'epoch': epoch + 1, **train_losses})
@@ -472,12 +481,14 @@ if __name__ == "__main__":
     parser.add_argument('--qd_zero_weight', type=float, default=50.0)
     parser.add_argument('--qr_identity_weight', type=float, default=10.0)
     parser.add_argument('--free_bits', type=float, default=48.0)
+    # Direction weight (rotation direction consistency loss).
+    parser.add_argument('--direction_weight', type=float, default=5.0, help='Weight for rotation direction consistency loss')
 
     parser.add_argument('--use_tensorboard', action='store_true', default=True)
     parser.add_argument('--use_wandb', action='store_true', default=True)
-    parser.add_argument('--wandb_project', type=str, default='dragmesh-vae') # (已优化)
+    parser.add_argument('--wandb_project', type=str, default='dragmesh-vae') 
     parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--output_dir', type=str, default='/root/autodl-tmp/outputs/dragmesh_vae') # (已优化)
+    parser.add_argument('--output_dir', type=str, default='/root/autodl-tmp/outputs/dragmesh_vae') 
     parser.add_argument('--save_every', type=int, default=100)
     parser.add_argument('--resume', type=str, default='')
 

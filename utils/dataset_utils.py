@@ -10,6 +10,7 @@ import numpy as np
 from typing import Optional, List, Dict
 
 from modules.data_loader_v2 import GAPartNetLoaderV2, DragMeshDatasetV2
+import trimesh
 
 
 class FixedGAPartNetLoader(GAPartNetLoaderV2):
@@ -50,13 +51,15 @@ class FixedGAPartNetLoader(GAPartNetLoaderV2):
 
 
 class FixedDragMeshDatasetV2(DragMeshDatasetV2):
-    """Dataset with fixed loader and category filtering."""
+    """Dataset wrapper with category filtering."""
 
     def __init__(self, dataset_root: str, num_frames: int = 16, num_points: int = 4096,
-                 categories: Optional[List[str]] = None):
+                 categories: Optional[List[str]] = None,
+                 joint_selection: str = "largest_motion"):
         self.loader = FixedGAPartNetLoader(dataset_root, categories=categories)
         self.num_frames = num_frames
         self.num_points = num_points
+        self.joint_selection = joint_selection
 
 
 class KPPDataset(FixedDragMeshDatasetV2):
@@ -66,12 +69,12 @@ class KPPDataset(FixedDragMeshDatasetV2):
         """
         Get a training sample.
         """
-        sample = self.loader.generate_training_sample(idx, self.num_frames)
+        sample = self.loader.generate_training_sample(idx, self.num_frames, joint_selection=getattr(self, "joint_selection", "largest_motion"))
 
-        # 1. 我们的 "中心" 现在是关节原点
+        # 1) The "center" is the joint origin in world space.
         center = sample['joint_origin'] 
         
-        # 2. 尺度仍然使用包围盒
+        # 2) Scale is still defined by the object bounding box.
         bounds = sample['initial_mesh'].bounds
         scale = (bounds[1] - bounds[0]).max()
         if scale < 1e-6:
@@ -106,11 +109,11 @@ class KPPDataset(FixedDragMeshDatasetV2):
             qd_gt = sample['qd_sequence'].copy()
             qd_gt = qd_gt / scale
 
-        # 8. Joint axis (不变, 归一化)
+        # 8) Joint axis (unchanged; normalized).
         joint_axis = sample['joint_axis']
         joint_axis = joint_axis / (np.linalg.norm(joint_axis) + 1e-8)
         
-        # 9. Part mask (不变)
+        # 9) Part mask (unchanged).
         original_mesh = sample['initial_mesh']
         vertex_part_mask = sample['part_mask'] # [N_verts]
         
@@ -129,7 +132,7 @@ class KPPDataset(FixedDragMeshDatasetV2):
             'qd_gt': torch.from_numpy(qd_gt).float(),
             'joint_type': torch.tensor(joint_type).long(),
             'joint_axis': torch.from_numpy(joint_axis).float(),
-            'joint_origin': torch.from_numpy(joint_origin_normalized).float(), # 发送 (0,0,0)
+            'joint_origin': torch.from_numpy(joint_origin_normalized).float(),  # sends (0, 0, 0)
             'part_mask': torch.from_numpy(sampled_part_mask).float()
         }
 

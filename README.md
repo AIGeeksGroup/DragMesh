@@ -70,6 +70,10 @@ cd ..
 ```
 
 ## 📦 Data Preparation (GAPartNet)
+
+> [!NOTE]  
+>  We have placed the built LMDB train and validation datasets at the following [link](https://huggingface.co/AIGeeksGroup/DragMesh). If you don't want to build them yourself, you can download them directly.
+
 1. Visit https://pku-epic.github.io/GAPartNet/ and download the articulated assets for the categories listed in `config/category_split_v2.json`.  
 2. Arrange files so that each object folder contains `mobility_annotation_gapartnet.urdf`, `meta.json`, and textured meshes (`*.obj`). Example:
    ```
@@ -88,6 +92,9 @@ cd ..
      --num_points 4096
    # Produces data/dragmesh_train.lmdb and data/dragmesh_val.lmdb
    ```
+   Optional knobs:
+   - `--joint_selection largest_motion`: chooses a representative joint by motion span × moving geometry scale.
+   - `--joint_selection first` / `random`: deterministic / random joint selection.
 4. Use `utils/balanced_dataset_utils.get_motion_type_weights` with `WeightedRandomSampler` if you need balanced revolute/prismatic sampling.
 
 ## 🧠 Training
@@ -109,7 +116,7 @@ python scripts/train_vae_v2.py \
   --use_tensorboard --use_wandb
 ```
 
-### Kinematics Prediction Pipeline (KPP-Net)
+### Kinematics Prediction Network (KPP-Net)
 ```bash
 python scripts/train_predictor.py \
   --lmdb_train_path data/dragmesh_train.lmdb \
@@ -134,23 +141,41 @@ python inference_animation.py \
   --sample_id 40261 \
   --output_dir results_deterministic \
   --num_samples 5 \
-  --num_frames 16
+  --num_frames 16 \
+  --fps 5 \
+  --loop_mode pingpong
 ```
-Outputs MP4, GIF, and animated GLB per object. If you plan to process a large dataset using dual-quaternion ground truth (no manual drags), prefer this script because running only KPP predictions frame-by-frame may introduce cumulative drift that eventually breaks physical alignment.
+Outputs MP4, GIF, and an animated GLB per object.
 
-### Custom Mesh Manipulation (manual input)
+### Batch Sweep (KPP-driven joint parameters)
+```bash
+python inference_animation_kpp.py \
+  --dataset_root data/gapartnet \
+  --checkpoint outputs/vae/best_model.pth \
+  --kpp_checkpoint outputs/kpp/best_model_kpp.pth \
+  --sample_id 40261 \
+  --output_dir results_kpp_anim \
+  --num_samples 5 \
+  --num_frames 16 \
+  --fps 5 \
+  --loop_mode pingpong
+```
+
+### Custom mesh manipulation (manual input)
 ```bash
 python inference_pipeline.py \
   --mesh_file assets/cabinet.obj \
   --mask_file assets/cabinet_vertex_labels.npy \
   --mask_format vertex \
-  --drag_point 0.12,0.48,0.05 \   # example: x,y,z point on the movable part
-  --drag_vector 0.0,0.0,0.2 \     # example: direction+magnitude of the drag
+  --drag_point 0.12,0.48,0.05 \
+  --drag_vector 0.0,0.0,0.2 \
   --manual_joint_type revolute \
   --kpp_checkpoint best_model_kpp.pth \
   --vae_checkpoint best_model.pth \
   --output_dir outputs/cabinet_demo \
-  --num_samples 3
+  --num_samples 3 \
+  --fps 5 \
+  --loop_mode pingpong
 ```
 Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manual_joint_type revolute` or `--manual_joint_type prismatic` to force a specific motion family when needed. If you omit the manual override, the pipeline first trusts KPP-Net and, when `--llm_endpoint` + `--llm_api_key` are provided, backs off to the LLM-based classifier described in `inference_pipeline.py`. Outputs share the same MP4/GIF/GLB format as the batch pipeline.
 
@@ -227,7 +252,7 @@ checkpoints/
 ├── inference_animation.py        # Batch evaluation + GLB export
 ├── inference_animation_kpp.py    # Dataset-driven animation tests (legacy interface)
 ├── inference_pipeline.py         # Interactive mesh manipulation pipeline
-├── environment.yml               # Conda environment (name: dragmesh)
+├── requirements.txt              # Python dependencies
 ├── README.md                     
 ```
 

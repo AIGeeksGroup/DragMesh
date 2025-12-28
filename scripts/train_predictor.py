@@ -30,6 +30,126 @@ except ImportError:
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+def str2bool(v):
+    """
+    NOTE: `argparse` with `type=bool` is error-prone (e.g., the string 'False' becomes True).
+    This helper supports common CLI boolean strings: True/False/1/0/yes/no.
+    """
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    if s in ("1", "true", "t", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "f", "no", "n", "off"):
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {v}")
+
+def _coerce_pointcloud(x: torch.Tensor) -> torch.Tensor:
+    """
+    Handle common point-cloud layouts from different LMDB formats:
+    - [N,3] / [B,N,3]
+    - [3,N] / [B,3,N]
+    - [N,>=3] keep the first 3 channels
+    """
+    if x is None:
+        return x
+    if x.dim() == 2:
+        # [N,C] or [C,N]
+        if x.shape[0] == 3 and x.shape[1] != 3:
+            x = x.transpose(0, 1)  # [N,3]
+        if x.shape[-1] > 3:
+            x = x[:, :3]
+        return x
+    if x.dim() == 3:
+        # [B,N,C] or [B,C,N]
+        if x.shape[1] == 3 and x.shape[2] != 3:
+            x = x.transpose(1, 2)  # [B,N,3]
+        if x.shape[-1] > 3:
+            x = x[:, :, :3]
+        return x
+    return x
+
+def _get_with_aliases(batch: dict, keys: list[str]):
+    for k in keys:
+        if k in batch:
+            return batch[k]
+    return None
+
+def _ensure_batch_fields(batch: dict, device: torch.device):
+    """
+    Make training robust to dataset / LMDB field-name variations:
+    - initial_mesh: required; shape is coerced to [B, N, 3]
+    - drag_point/drag_vector/part_mask: default to zeros/ones if missing
+    - joint_type/axis/origin: support common aliases with dtype/shape fallbacks
+    """
+    mesh = _get_with_aliases(batch, ["initial_mesh", "mesh", "points", "pc"])
+    if mesh is None:
+        raise KeyError("Missing required field: initial_mesh (or mesh/points/pc)")
+    mesh = _coerce_pointcloud(mesh).to(device)
+
+    # N
+    if mesh.dim() != 3:
+        raise ValueError(f"initial_mesh should be [B,N,3], got shape={tuple(mesh.shape)}")
+    B, N, _ = mesh.shape
+
+    part_mask = _get_with_aliases(batch, ["part_mask", "mask", "seg", "part_seg"])
+    if part_mask is None:
+        part_mask = torch.ones((B, N), device=device, dtype=torch.float32)
+    else:
+        if part_mask.dim() == 1:
+            part_mask = part_mask.unsqueeze(0).expand(B, -1)
+        part_mask = part_mask.to(device).float()
+
+    drag_point = _get_with_aliases(batch, ["drag_point", "drag_pt", "start_point"])
+    if drag_point is None:
+        drag_point = torch.zeros((B, 3), device=device, dtype=mesh.dtype)
+    else:
+        drag_point = drag_point.to(device).float()
+        if drag_point.dim() == 1:
+            drag_point = drag_point.unsqueeze(0)
+
+    drag_vector = _get_with_aliases(batch, ["drag_vector", "drag_vec", "direction", "drag_dir"])
+    if drag_vector is None:
+        drag_vector = torch.zeros((B, 3), device=device, dtype=mesh.dtype)
+    else:
+        drag_vector = drag_vector.to(device).float()
+        if drag_vector.dim() == 1:
+            drag_vector = drag_vector.unsqueeze(0)
+
+    gt_joint_type = _get_with_aliases(batch, ["joint_type", "gt_joint_type", "type"])
+    if gt_joint_type is None:
+        # Default to revolute.
+        gt_joint_type = torch.zeros((B,), device=device, dtype=torch.long)
+    else:
+        gt_joint_type = gt_joint_type.to(device)
+        if gt_joint_type.dim() == 0:
+            gt_joint_type = gt_joint_type.view(1)
+        if gt_joint_type.dim() == 2 and gt_joint_type.shape[-1] == 1:
+            gt_joint_type = gt_joint_type[:, 0]
+        # Accept both float and int.
+        gt_joint_type = gt_joint_type.long()
+
+    gt_joint_axis = _get_with_aliases(batch, ["joint_axis", "gt_joint_axis", "axis"])
+    if gt_joint_axis is None:
+        gt_joint_axis = torch.tensor([0.0, 0.0, 1.0], device=device).view(1, 3).expand(B, 3)
+    else:
+        gt_joint_axis = gt_joint_axis.to(device).float()
+        if gt_joint_axis.dim() == 1:
+            gt_joint_axis = gt_joint_axis.unsqueeze(0)
+        gt_joint_axis = F.normalize(gt_joint_axis, dim=-1)
+
+    gt_joint_origin = _get_with_aliases(batch, ["joint_origin", "gt_joint_origin", "origin"])
+    if gt_joint_origin is None:
+        gt_joint_origin = torch.zeros((B, 3), device=device, dtype=torch.float32)
+    else:
+        gt_joint_origin = gt_joint_origin.to(device).float()
+        if gt_joint_origin.dim() == 1:
+            gt_joint_origin = gt_joint_origin.unsqueeze(0)
+
+    return mesh, part_mask, drag_point, drag_vector, gt_joint_type, gt_joint_axis, gt_joint_origin
+
 
 def custom_collate_fn(batch):
 
@@ -53,15 +173,12 @@ def train_epoch(model, dataloader, optimizer, device,
     for batch in pbar:
         if batch is None: 
             continue
-        
-        mesh = batch['initial_mesh'].to(device)
-        drag_point = batch['drag_point'].to(device)
-        drag_vector = batch['drag_vector'].to(device)
-        part_mask = batch['part_mask'].to(device) if 'part_mask' in batch else None
-        
-        gt_joint_type = batch['joint_type'].to(device)
-        gt_joint_axis = batch['joint_axis'].to(device)
-        gt_joint_origin = batch['joint_origin'].to(device)
+        try:
+            mesh, part_mask, drag_point, drag_vector, gt_joint_type, gt_joint_axis, gt_joint_origin = _ensure_batch_fields(batch, device=device)
+        except Exception as e:
+            # Skip malformed samples to avoid interrupting long runs.
+            pbar.set_postfix({'skip': type(e).__name__})
+            continue
 
         pred_type_logits, pred_axis, pred_origin = model(
             mesh, part_mask, drag_point, drag_vector
@@ -118,15 +235,10 @@ def validate(model, dataloader, device,
         for batch in tqdm(dataloader, desc="Validation"):
             if batch is None: 
                 continue
-            
-            mesh = batch['initial_mesh'].to(device)
-            drag_point = batch['drag_point'].to(device)
-            drag_vector = batch['drag_vector'].to(device)
-            part_mask = batch['part_mask'].to(device) if 'part_mask' in batch else None
-            
-            gt_joint_type = batch['joint_type'].to(device)
-            gt_joint_axis = batch['joint_axis'].to(device)
-            gt_joint_origin = batch['joint_origin'].to(device)
+            try:
+                mesh, part_mask, drag_point, drag_vector, gt_joint_type, gt_joint_axis, gt_joint_origin = _ensure_batch_fields(batch, device=device)
+            except Exception:
+                continue
             
             pred_type_logits, pred_axis, pred_origin = model(
                 mesh, part_mask, drag_point, drag_vector
@@ -375,13 +487,13 @@ if __name__ == "__main__":
     parser.add_argument('--origin_l1_beta', type=float, default=0.005)  
     
 
-    parser.add_argument('--use_mask', type=bool, default=True)
-    parser.add_argument('--use_drag', type=bool, default=True)
+    parser.add_argument('--use_mask', type=str2bool, default=True)
+    parser.add_argument('--use_drag', type=str2bool, default=True)
     
     # Ablation parameters
     parser.add_argument('--encoder_type', type=str, default='attention', choices=['pointnet', 'attention'])
     parser.add_argument('--head_type', type=str, default='decoupled', choices=['coupled', 'decoupled'])
-    parser.add_argument('--predict_type', type=bool, default=True)
+    parser.add_argument('--predict_type', type=str2bool, default=True)
     
     parser.add_argument('--use_tensorboard', action='store_true', default=True)
     parser.add_argument('--use_wandb', action='store_true', default=True)

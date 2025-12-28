@@ -149,16 +149,21 @@ def enhanced_dualquat_vae_loss(
     pred_qr: torch.Tensor, pred_qd: torch.Tensor, gt_qr: torch.Tensor, gt_qd: torch.Tensor, 
     mu: torch.Tensor, logvar: torch.Tensor, joint_type: torch.Tensor, joint_axis: torch.Tensor, 
     joint_origin: torch.Tensor, initial_mesh: torch.Tensor, part_mask: torch.Tensor,
+    # === Optional conditioning / new arguments ===
+    rotation_direction: Optional[torch.Tensor] = None,
+    # === Loss weights ===
     kl_weight: float = 0.01, cd_weight: float = 30.0, mesh_recon_weight: float = 10.0, 
     quat_recon_weight: float = 0.2, constraint_weight: float = 100.0, 
     qd_zero_weight: float = 50.0, qr_identity_weight: float = 10.0, 
     free_bits: float = 48.0, 
+    direction_weight: float = 5.0,  # weight for direction loss
 ) -> Dict[str, torch.Tensor]:
 
     reduction: str = 'mean'
     B, T = pred_qr.shape[0], pred_qr.shape[1]
     device = pred_qr.device
     
+    # 1. Reconstruction Loss
     mesh_recon_loss = compute_mesh_recon_loss(pred_qr, pred_qd, gt_qr, gt_qd, initial_mesh, part_mask, first_step_weight=2.0)
     qr_recon_loss = compute_quaternion_loss(pred_qr, gt_qr, first_step_weight=2.0)
     qd_recon_loss = compute_translation_loss(pred_qd, pred_qr, gt_qd, gt_qr, first_step_weight=2.0)
@@ -168,17 +173,19 @@ def enhanced_dualquat_vae_loss(
         quat_recon_weight * (qr_recon_loss + qd_recon_loss)
     )
     
+    # 2. Chamfer Loss
     pred_mesh = _apply_dual_quaternion(initial_mesh, pred_qr, pred_qd)
     with torch.no_grad():
         gt_mesh = _apply_dual_quaternion(initial_mesh, gt_qr, gt_qd)
     cd_loss = _chamfer_distance_loss(pred_mesh, gt_mesh, mask=part_mask)
     
+    # 3. Constraints
     is_revolute_expanded = (joint_type == 0).float().unsqueeze(1).expand(-1, T)
     is_prismatic_expanded = (joint_type == 1).float().unsqueeze(1).expand(-1, T)
     is_revolute_1d = (joint_type == 0).float()
     is_prismatic_1d = (joint_type == 1).float()
     
-    # --- (Revolute/Prismatic) ---
+    # --- (Revolute/Prismatic Axis) ---
     pred_rot_axis, valid_mask = extract_rotation_axis_safe(pred_qr)
     gt_axis_norm = F.normalize(joint_axis.unsqueeze(1).expand(-1, T, -1), p=2, dim=-1)
 
@@ -207,6 +214,25 @@ def enhanced_dualquat_vae_loss(
     qr_identity_loss = torch.mean(geodesic_dist_ident ** 2, dim=1)
     qr_identity_loss = torch.mean(qr_identity_loss * is_prismatic_1d)
 
+    # === Direction consistency loss ===
+    # Encourage predicted rotation direction to match the intended drag direction.
+    direction_loss = torch.tensor(0.0, device=device)
+    
+    if rotation_direction is not None:
+        # rotation_direction: signed axis, shape [B, 3] -> expand to [B, T, 3]
+        gt_dir = F.normalize(rotation_direction.unsqueeze(1).expand(-1, T, -1), p=2, dim=-1)
+        
+        # pred_rot_axis is [B, T, 3] (already extracted above).
+        # We want aligned directions (dot -> 1.0); opposite directions (dot -> -1.0) should incur high loss.
+        dir_dot = torch.sum(pred_rot_axis * gt_dir, dim=-1) # Range [-1, 1]
+        
+        # Loss = 1 - dot. (Aligned=0, Opposite=2)
+        loss_dir_per_frame = (1.0 - dir_dot) * valid_mask.float()
+        
+        # Apply only to revolute joints.
+        direction_loss = torch.mean(loss_dir_per_frame * is_revolute_expanded)
+
+    # 4. KL Loss
     kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
     kl_loss_raw = torch.sum(kl_per_dim, dim=1)
     
@@ -219,16 +245,16 @@ def enhanced_dualquat_vae_loss(
     else:
         kl_loss = kl_loss_per_sample.mean()
 
-    
+    # Total Loss
     total_loss = (
         total_recon_loss +
         cd_weight * cd_loss +
         constraint_weight * axis_constraint_loss +
         qd_zero_weight * qd_zero_loss +
         qr_identity_weight * qr_identity_loss +
-        kl_weight * kl_loss
+        kl_weight * kl_loss +
+        direction_weight * direction_loss
     )
-    
     
     if reduction == 'mean':
         return {
@@ -245,6 +271,7 @@ def enhanced_dualquat_vae_loss(
             'hinge_loss': torch.tensor(0.0).to(device),
             'kl_loss': kl_loss,
             'kl_loss_raw': kl_loss_raw.mean(), 
+            'direction_loss': direction_loss,  # direction consistency loss
         }
     else:
         raise ValueError(f"Unsupported reduction: {reduction}. Only 'mean' is supported.")

@@ -3,22 +3,16 @@ import numpy as np
 import trimesh
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple, Optional
+from collections import deque
+import gc
 import torch
 import torch.nn.functional as F
+
 
 
 def axis_angle_to_dualquat(axis: np.ndarray, origin: np.ndarray, angle: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Convert axis-angle representation to dual quaternion for revolute joint.
-
-    Args:
-        axis: Rotation axis [3]
-        origin: Point on rotation axis [3]
-        angle: Rotation angle in radians
-
-    Returns:
-        qr: Rotation quaternion [4]
-        qd: Translation quaternion [4]
     """
     # Normalize axis
     axis = axis / (np.linalg.norm(axis) + 1e-8)
@@ -31,8 +25,6 @@ def axis_angle_to_dualquat(axis: np.ndarray, origin: np.ndarray, angle: float) -
     qr = np.array([cos_half, axis[0] * sin_half, axis[1] * sin_half, axis[2] * sin_half])
 
     # Translation quaternion
-    # qd = 0.5 * quaternion_mul(t, qr)
-    # For revolute joint, translation is from rotation around point
     t_vec = origin - quaternion_rotate(qr, origin)
     t = np.array([0.0, t_vec[0], t_vec[1], t_vec[2]])
 
@@ -44,14 +36,6 @@ def axis_angle_to_dualquat(axis: np.ndarray, origin: np.ndarray, angle: float) -
 def translation_to_dualquat(axis: np.ndarray, distance: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Convert translation to dual quaternion for prismatic joint.
-
-    Args:
-        axis: Translation direction [3]
-        distance: Translation distance
-
-    Returns:
-        qr: Rotation quaternion [4] (identity)
-        qd: Translation quaternion [4]
     """
     # Normalize axis
     axis = axis / (np.linalg.norm(axis) + 1e-8)
@@ -95,6 +79,7 @@ def quaternion_rotate(q: np.ndarray, point: np.ndarray) -> np.ndarray:
     return rotated[1:]
 
 
+
 class GAPartNetLoaderV2:
     """
     Data loader for GAPartNet with Dual Quaternion ground truth.
@@ -107,10 +92,20 @@ class GAPartNetLoaderV2:
     def _get_object_list(self) -> List[str]:
         """Get list of all object directories in the dataset."""
         object_list = []
+        # Support the case where dataset_root directly points to an object folder.
+        if os.path.exists(os.path.join(self.dataset_root, "mobility_annotation_gapartnet.urdf")):
+            return [self.dataset_root]
+
         for category in os.listdir(self.dataset_root):
             category_path = os.path.join(self.dataset_root, category)
             if not os.path.isdir(category_path):
                 continue
+            
+            # Support the case where the category directory itself contains the URDF.
+            if os.path.exists(os.path.join(category_path, "mobility_annotation_gapartnet.urdf")):
+                object_list.append(category_path)
+                continue
+
             for obj_id in os.listdir(category_path):
                 obj_path = os.path.join(category_path, obj_id)
                 urdf_path = os.path.join(obj_path, "mobility_annotation_gapartnet.urdf")
@@ -129,10 +124,7 @@ class GAPartNetLoaderV2:
         # Parse links and extract ALL mesh filenames
         for link in root.findall('link'):
             link_name = link.get('name')
-            if link_name == 'base' or link_name == 'root':
-                continue
-
-            # Find ALL visual elements (a link can have multiple meshes!)
+            # Keep the link entry even if it has no mesh: it can still be a joint attachment.
             mesh_files = []
             for visual in link.findall('visual'):
                 geometry = visual.find('geometry')
@@ -142,12 +134,9 @@ class GAPartNetLoaderV2:
                         mesh_filename = mesh.get('filename')
                         if mesh_filename not in mesh_files:  # Avoid duplicates
                             mesh_files.append(mesh_filename)
+            links[link_name] = mesh_files
 
-            if len(mesh_files) > 0:
-                # Store all mesh files for this link
-                links[link_name] = mesh_files
-
-        # Parse joints
+        # Parse joints (only movable joints are added to the `joints` list).
         for joint in root.findall('joint'):
             joint_type = joint.get('type')
             if joint_type == 'fixed':
@@ -192,23 +181,134 @@ class GAPartNetLoaderV2:
                 'limit': {'lower': lower, 'upper': upper}
             })
 
-        return {'joints': joints, 'links': links}
+        # --- Build a full tree map (including fixed joints) ---
+        # This is important for propagating motion to descendant links (e.g., handle follows door).
+        full_tree_map = {}
+        for joint in root.findall('joint'):
+            p = joint.find('parent').get('link')
+            c = joint.find('child').get('link')
+            if p not in full_tree_map:
+                full_tree_map[p] = []
+            full_tree_map[p].append(c)
+
+        return {'joints': joints, 'links': links, 'full_tree_map': full_tree_map}
+
+    def _get_subtree_links(self, root_link: str, tree_map: Dict[str, List[str]]) -> List[str]:
+        """
+        Collect all descendant links starting from `root_link` (including itself).
+        """
+        subtree: List[str] = []
+        seen = set()
+        queue = deque([root_link])
+        while queue:
+            current = queue.popleft()
+            if current in seen:
+                continue
+            seen.add(current)
+            subtree.append(current)
+            for child in tree_map.get(current, []):
+                queue.append(child)
+        return subtree
+
+    def _joint_motion_span(self, joint: Dict) -> float:
+        """Estimate motion span to pick a representative joint (avoid tiny first-part joints)."""
+        jtype = joint.get('type')
+        if jtype == 'continuous':
+            return float(2.0 * np.pi)
+        lower = float(joint.get('limit', {}).get('lower', -1.57))
+        upper = float(joint.get('limit', {}).get('upper', 1.57))
+        span = abs(upper - lower)
+        # Some joints have near-zero ranges (e.g., buttons with 0.005). Avoid degeneracy.
+        if not np.isfinite(span) or span < 1e-6:
+            return float(np.pi / 6.0) if jtype in ['revolute'] else 0.01
+        return float(span)
+
+    def _select_joint_and_moving_links(
+        self,
+        urdf_data: Dict,
+        part_meshes: Optional[Dict[str, trimesh.Trimesh]] = None,
+        links: Optional[Dict[str, List[str]]] = None,
+        obj_path: Optional[str] = None,
+        joint_selection: str = "largest_motion",
+        joint_idx: Optional[int] = None,
+    ) -> Tuple[Dict, List[str]]:
+        """
+        Select a joint for sample generation and return the corresponding moving-subtree links.
+
+        - joint_selection:
+          - "first": the first movable joint
+          - "random": a random movable joint
+          - "largest_motion": maximize (motion span) × (moving geometry scale). Recommended default to
+            avoid selecting tiny parts such as small buttons.
+        """
+        joints: List[Dict] = urdf_data.get('joints', [])
+        if not joints:
+            raise ValueError("No movable joints found")
+
+        if joint_idx is not None:
+            if joint_idx < 0 or joint_idx >= len(joints):
+                raise IndexError(f"joint_idx {joint_idx} out of range (0..{len(joints)-1})")
+            joint = joints[joint_idx]
+            moving_links = self._get_subtree_links(joint['child'], urdf_data['full_tree_map'])
+            return joint, moving_links
+
+        if joint_selection == "first":
+            joint = joints[0]
+            moving_links = self._get_subtree_links(joint['child'], urdf_data['full_tree_map'])
+            return joint, moving_links
+
+        if joint_selection == "random":
+            joint = joints[int(np.random.randint(0, len(joints)))]
+            moving_links = self._get_subtree_links(joint['child'], urdf_data['full_tree_map'])
+            return joint, moving_links
+
+        # Default: "largest_motion"
+        best_joint = None
+        best_links: List[str] = []
+        best_score = -1.0
+        for j in joints:
+            subtree_links = self._get_subtree_links(j['child'], urdf_data['full_tree_map'])
+            # Estimate moving geometry scale (prefer vertex count; otherwise use mesh-file count as a proxy).
+            geom_score = 0
+            if part_meshes is not None:
+                for ln in subtree_links:
+                    mesh = part_meshes.get(ln)
+                    if mesh is not None:
+                        geom_score += int(len(mesh.vertices))
+            else:
+                links_dict = links
+                if links_dict is None or obj_path is None:
+                    geom_score = 0
+                else:
+                    for ln in subtree_links:
+                        for fn in (links_dict.get(ln) or []):
+                            if os.path.exists(os.path.join(obj_path, fn)):
+                                geom_score += 1
+
+            if geom_score <= 0:
+                continue
+
+            score = float(geom_score) * self._joint_motion_span(j)
+            if score > best_score:
+                best_score = score
+                best_joint = j
+                best_links = subtree_links
+
+        if best_joint is None:
+            # Fallback to "first".
+            joint = joints[0]
+            moving_links = self._get_subtree_links(joint['child'], urdf_data['full_tree_map'])
+            return joint, moving_links
+
+        return best_joint, best_links
 
     def load_part_meshes(self, obj_path: str, links: Dict[str, List[str]]) -> Dict[str, trimesh.Trimesh]:
         """
         Load meshes for each part/link.
-
-        Args:
-            obj_path: Path to object directory
-            links: Dict mapping link_name to list of mesh filenames
-
-        Returns:
-            Dict mapping link_name to combined trimesh (all meshes for that link merged)
         """
         part_meshes = {}
 
         for link_name, mesh_filenames in links.items():
-            # Load all meshes for this link
             link_meshes = []
             for mesh_filename in mesh_filenames:
                 mesh_path = os.path.join(obj_path, mesh_filename)
@@ -217,32 +317,173 @@ class GAPartNetLoaderV2:
                         mesh = trimesh.load(mesh_path, force='mesh', process=False)
                         link_meshes.append(mesh)
                     except Exception as e:
-                        print(f"Warning: Failed to load {mesh_path}: {e}")
+                        # print(f"Warning: Failed to load {mesh_path}: {e}")
+                        pass
 
-            # Combine all meshes for this link
             if len(link_meshes) > 0:
                 if len(link_meshes) == 1:
                     part_meshes[link_name] = link_meshes[0]
                 else:
-                    # Concatenate multiple meshes for this link
                     combined_mesh = trimesh.util.concatenate(link_meshes)
                     part_meshes[link_name] = combined_mesh
 
         return part_meshes
 
-    def generate_training_sample(self, obj_idx: int, num_frames: int = 16) -> Dict:
+    def _load_mesh_safe(self, mesh_path: str) -> Optional[trimesh.Trimesh]:
         """
-        Generate training sample with dual quaternion ground truth.
+        More robust mesh loading:
+        - Accept trimesh.Scene outputs
+        - Keep process=False to avoid unnecessary recomputation
+        """
+        if not os.path.exists(mesh_path):
+            return None
+        try:
+            m = trimesh.load(mesh_path, force='mesh', process=False)
+        except Exception:
+            return None
+
+        if isinstance(m, trimesh.Scene):
+            geoms = [g for g in m.geometry.values() if isinstance(g, trimesh.Trimesh)]
+            if not geoms:
+                return None
+            try:
+                m = trimesh.util.concatenate(geoms)
+            except Exception:
+                return None
+
+        if not isinstance(m, trimesh.Trimesh):
+            return None
+        if m.vertices is None or m.faces is None:
+            return None
+        if len(m.vertices) == 0 or len(m.faces) == 0:
+            return None
+        return m
+
+    def _stream_sample_points(
+        self,
+        obj_path: str,
+        links: Dict[str, List[str]],
+        moving_links: set,
+        num_points: int,
+        joint_origin: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Low-memory mode: avoid mesh concatenation.
+        Load each mesh file -> sample points -> release immediately.
 
         Returns:
-            Dictionary containing:
-                - initial_mesh: Combined mesh at initial state
-                - drag_point: Starting point of drag [3]
-                - drag_vector: Drag displacement vector [3]
-                - qr_sequence: Rotation quaternion sequence [num_frames, 4]
-                - qd_sequence: Translation quaternion sequence [num_frames, 4]
-                - joint_type: 'revolute' or 'prismatic'
-                - part_mask: Which vertices belong to movable part [N]
+          - points: [num_points, 3] float32
+          - point_mask: [num_points] int32 (0=static, 1=movable)
+          - movable_points: [K, 3] float32 (only for drag-point sampling; K<=num_points)
+          - bounds_min: [3] float32
+          - bounds_max: [3] float32
+        """
+        # Count available mesh files to allocate per-mesh sampling budget.
+        mesh_entries: List[Tuple[str, int]] = []  # (mesh_path, is_moving)
+        for link_name, mesh_filenames in links.items():
+            is_moving = 1 if link_name in moving_links else 0
+            for mesh_filename in mesh_filenames:
+                mesh_path = os.path.join(obj_path, mesh_filename)
+                if os.path.exists(mesh_path):
+                    mesh_entries.append((mesh_path, is_moving))
+
+        if not mesh_entries:
+            raise ValueError(f"No meshes found under {obj_path}")
+
+        n_total = len(mesh_entries)
+        base = max(1, int(num_points // n_total))
+        rem = int(num_points - base * n_total)
+        if rem < 0:
+            rem = 0
+
+        all_points = []
+        all_masks = []
+        movable_points = []
+
+        bounds_min = np.array([np.inf, np.inf, np.inf], dtype=np.float32)
+        bounds_max = np.array([-np.inf, -np.inf, -np.inf], dtype=np.float32)
+
+        # Sample points per mesh.
+        for i, (mesh_path, is_moving) in enumerate(mesh_entries):
+            n_i = base + (1 if i < rem else 0)
+            if n_i <= 0:
+                continue
+
+            mesh = self._load_mesh_safe(mesh_path)
+            if mesh is None:
+                continue
+
+            # Accumulate bounds.
+            try:
+                b = mesh.bounds.astype(np.float32)
+                bounds_min = np.minimum(bounds_min, b[0])
+                bounds_max = np.maximum(bounds_max, b[1])
+            except Exception:
+                pass
+
+            try:
+                pts, _ = trimesh.sample.sample_surface(mesh, n_i)
+            except Exception:
+                del mesh
+                continue
+
+            pts = pts.astype(np.float32, copy=False)
+            mask = np.full((len(pts),), int(is_moving), dtype=np.int32)
+
+            all_points.append(pts)
+            all_masks.append(mask)
+            if is_moving:
+                movable_points.append(pts)
+
+            # Proactively release large objects to reduce peak memory.
+            del mesh
+            if (i % 10) == 0:
+                gc.collect()
+
+        if not all_points:
+            raise ValueError(f"Failed to sample any points from {obj_path}")
+
+        points = np.concatenate(all_points, axis=0)
+        point_mask = np.concatenate(all_masks, axis=0)
+
+        # Trim/pad to exactly num_points (meshes may fail to load, causing mismatch).
+        if len(points) >= num_points:
+            points = points[:num_points]
+            point_mask = point_mask[:num_points]
+        else:
+            # If insufficient, pad by resampling with replacement (avoid downstream failures).
+            pad_n = num_points - len(points)
+            rep_idx = np.random.randint(0, len(points), size=pad_n)
+            points = np.concatenate([points, points[rep_idx]], axis=0)
+            point_mask = np.concatenate([point_mask, point_mask[rep_idx]], axis=0)
+
+        if movable_points:
+            movable_points = np.concatenate(movable_points, axis=0)
+        else:
+            movable_points = points[point_mask.astype(bool)]
+
+        if movable_points is None or len(movable_points) == 0:
+            raise ValueError("No movable points sampled (moving subtree has no geometry?)")
+
+        # If bounds were not updated (extreme edge cases), fall back to point-cloud bounds.
+        if not np.isfinite(bounds_min).all() or not np.isfinite(bounds_max).all():
+            bounds_min = points.min(axis=0).astype(np.float32)
+            bounds_max = points.max(axis=0).astype(np.float32)
+
+        return points, point_mask, movable_points, bounds_min, bounds_max
+
+    def generate_training_sample(
+        self,
+        obj_idx: int,
+        num_frames: int = 16,
+        joint_selection: str = "largest_motion",
+        joint_idx: Optional[int] = None,
+        return_mesh: bool = True,
+        num_points: Optional[int] = None,
+    ) -> Dict:
+        """
+        Generate training sample with dual quaternion ground truth.
+        Fix motion leakage by recursively collecting all descendant moving parts.
         """
         obj_path = self.object_list[obj_idx]
 
@@ -250,22 +491,184 @@ class GAPartNetLoaderV2:
         urdf_path = os.path.join(obj_path, "mobility_annotation_gapartnet.urdf")
         urdf_data = self.parse_urdf(urdf_path)
 
-        # Load part meshes
-        part_meshes = self.load_part_meshes(obj_path, urdf_data['links'])
-
         if len(urdf_data['joints']) == 0:
             raise ValueError(f"No movable joints found in {obj_path}")
 
-        # Select first movable joint
-        joint = urdf_data['joints'][0]
-        child_link = joint['child']
+        # Select a joint for sample generation (default avoids always picking a tiny first joint).
+        # When return_mesh=False, avoid loading full meshes (OOM); use mesh-file count as a proxy score.
+        part_meshes = None
+        if return_mesh:
+            part_meshes = self.load_part_meshes(obj_path, urdf_data['links'])
 
-        if child_link not in part_meshes:
-            raise ValueError(f"Child link {child_link} mesh not found")
+        joint, moving_links_list = self._select_joint_and_moving_links(
+            urdf_data=urdf_data,
+            part_meshes=part_meshes,
+            links=urdf_data.get('links'),
+            obj_path=obj_path,
+            joint_selection=joint_selection,
+            joint_idx=joint_idx,
+        )
+        
+        # --- Core: descendant propagation ---
+        moving_root_link = joint['child']
+        
+        # Use the full tree map to collect all links that should move with this joint
+        # (e.g., door -> handle, lock). `moving_root_link` may have many descendants via fixed joints.
+        all_moving_links = set(moving_links_list if moving_links_list else self._get_subtree_links(moving_root_link, urdf_data['full_tree_map']))
 
-        child_mesh = part_meshes[child_link]
+        # ========== Low-memory point-cloud mode (for LMDB building) ==========
+        if not return_mesh:
+            if num_points is None:
+                raise ValueError("return_mesh=False requires num_points")
 
+            points, point_mask, movable_points, bounds_min, bounds_max = self._stream_sample_points(
+                obj_path=obj_path,
+                links=urdf_data['links'],
+                moving_links=all_moving_links,
+                num_points=int(num_points),
+                joint_origin=joint['origin_xyz'],
+            )
+
+            # Sample a drag point: pick a movable point far from the joint origin.
+            if joint['type'] in ['revolute', 'continuous']:
+                d = np.linalg.norm(movable_points - joint['origin_xyz'][None, :], axis=1)
+                if len(d) == 0:
+                    raise ValueError("No movable points for drag sampling")
+                k = max(1, len(d) // 5)  # top 20%
+                far_idx = np.argpartition(d, -k)[-k:]
+                drag_point_start = movable_points[np.random.choice(far_idx)].copy()
+
+                lower, upper = joint['limit']['lower'], joint['limit']['upper']
+                if upper - lower < np.pi:
+                    lower, upper = -np.pi, np.pi
+                angle_change = upper - lower
+                rotation_direction = np.array(joint['axis']) * np.sign(angle_change)
+            else:
+                drag_point_start = movable_points[np.random.randint(0, len(movable_points))].copy()
+                rotation_direction = None
+
+            # Subsequent steps (DQ sequence / trajectory generation) follow the original logic.
+            lower, upper = joint['limit']['lower'], joint['limit']['upper']
+
+            if joint['type'] == 'continuous':
+                upper = max(upper, np.pi)
+                lower = min(lower, -np.pi)
+
+            if upper <= lower:
+                upper = lower + 1.0
+
+            if upper > lower:
+                angles = np.linspace(lower, upper, num_frames)
+            else:
+                if joint['type'] == 'continuous':
+                    angles = np.linspace(-np.pi, np.pi, num_frames)
+                else:
+                    angles = np.linspace(0, np.pi/2, num_frames)
+
+            qr_sequence = []
+            qd_sequence = []
+            for angle in angles:
+                if joint['type'] == 'revolute' or joint['type'] == 'continuous':
+                    qr, qd = axis_angle_to_dualquat(joint['axis'], joint['origin_xyz'], angle)
+                elif joint['type'] == 'prismatic':
+                    qr, qd = translation_to_dualquat(joint['axis'], angle)
+                else:
+                    raise ValueError(f"Unknown joint type: {joint['type']}")
+                qr_sequence.append(qr)
+                qd_sequence.append(qd)
+
+            qr_sequence = np.array(qr_sequence)
+            qd_sequence = np.array(qd_sequence)
+
+            drag_trajectory = []
+            for qr, qd in zip(qr_sequence, qd_sequence):
+                point_rotated = quaternion_rotate(qr, drag_point_start)
+                t_vec = 2.0 * quaternion_multiply(qd, quaternion_conjugate(qr))[1:]
+                drag_trajectory.append(point_rotated + t_vec)
+            drag_trajectory = np.array(drag_trajectory)
+
+            if len(drag_trajectory) > 2:
+                start_tangent = drag_trajectory[1] - drag_trajectory[0]
+                mid_idx = len(drag_trajectory) // 2
+                mid_tangent = drag_trajectory[mid_idx+1] - drag_trajectory[mid_idx]
+                end_tangent = drag_trajectory[-1] - drag_trajectory[-2]
+                trajectory_vectors = np.stack([start_tangent, mid_tangent, end_tangent])
+            else:
+                diff = drag_trajectory[-1] - drag_trajectory[0]
+                trajectory_vectors = np.stack([diff, diff, diff])
+
+            diffs = drag_trajectory[1:] - drag_trajectory[:-1]
+            lengths = np.linalg.norm(diffs, axis=1)
+            total_length = lengths.sum()
+            if total_length > 0:
+                avg_dir = np.mean(trajectory_vectors, axis=0)
+                avg_dir = avg_dir / (np.linalg.norm(avg_dir) + 1e-8)
+                drag_vector = avg_dir * total_length
+            else:
+                drag_vector = drag_trajectory[-1] - drag_trajectory[0]
+
+            rotation_direction = None
+            if joint['type'] in ['revolute', 'continuous']:
+                if len(angles) >= 2:
+                    angle_change = angles[-1] - angles[0]
+                    rotation_direction = np.array(joint['axis']) * np.sign(angle_change)
+                else:
+                    rotation_direction = np.array(joint['axis'])
+
+            drag_dir = drag_vector / (np.linalg.norm(drag_vector) + 1e-8)
+            relative_point = drag_point_start - joint['origin_xyz']
+            cross_axis_drag = np.cross(joint['axis'], drag_dir)
+            rotation_sign = np.sign(np.dot(cross_axis_drag, relative_point)) or 1.0
+
+            if rotation_direction is None:
+                rotation_direction = np.array(joint['axis'])
+
+            rotation_direction = rotation_direction * rotation_sign
+            drag_vector = drag_vector * rotation_sign
+
+            return {
+                # Use ndarray instead of trimesh so upstream datasets can normalize/write LMDB directly.
+                'initial_mesh': points.astype(np.float32, copy=False),
+                'drag_point': drag_point_start.astype(np.float32, copy=False),
+                'drag_vector': drag_vector.astype(np.float32, copy=False),
+                'trajectory_vectors': trajectory_vectors.astype(np.float32, copy=False),
+                'rotation_direction': rotation_direction.astype(np.float32, copy=False),
+                'qr_sequence': qr_sequence.astype(np.float32, copy=False),
+                'qd_sequence': qd_sequence.astype(np.float32, copy=False),
+                'drag_trajectory': drag_trajectory.astype(np.float32, copy=False),
+                'joint_type': joint['type'],
+                # point-level mask (0=static, 1=movable)
+                'part_mask': point_mask.astype(np.int32, copy=False),
+                'obj_path': obj_path,
+                'joint_axis': joint['axis'],
+                'joint_origin': joint['origin_xyz'],
+                # Optionally return bounds for upstream normalization.
+                'bounds_min': bounds_min,
+                'bounds_max': bounds_max,
+            }
+
+        # ========== Full mesh concatenation mode (for inference / visualization) ==========
+        if part_meshes is None:
+            part_meshes = self.load_part_meshes(obj_path, urdf_data['links'])
+        # Gather moving meshes and static meshes.
+        movable_meshes_list = []
+        static_meshes_list = []
+
+        for link_name, mesh in part_meshes.items():
+            if link_name in all_moving_links:
+                movable_meshes_list.append(mesh)
+            else:
+                static_meshes_list.append(mesh)
+
+        if not movable_meshes_list:
+            raise ValueError(f"Child link {moving_root_link} (and descendants) have no meshes")
+
+        # Concatenate all moving parts.
+        child_mesh = trimesh.util.concatenate(movable_meshes_list)
+
+        # Sample a drag point.
         if joint['type'] in ['revolute', 'continuous']:
+            # Sample the farthest point over the whole moving part.
             distances = np.linalg.norm(child_mesh.vertices - joint['origin_xyz'], axis=1)
             far_indices = np.argsort(distances)[-max(1, len(child_mesh.vertices) // 5):]  # Top 20%
             drag_point_idx = np.random.choice(far_indices)
@@ -275,11 +678,10 @@ class GAPartNetLoaderV2:
             lower, upper = joint['limit']['lower'], joint['limit']['upper']
             if upper - lower < np.pi:
                 lower, upper = -np.pi, np.pi
-            angles = np.linspace(lower, upper, num_frames)
             
             # For rotation_direction
-            angle_change = upper - lower  # Always positive if upper > lower
-            rotation_direction = np.array(joint['axis']) * np.sign(angle_change)  # Ensure positive
+            angle_change = upper - lower
+            rotation_direction = np.array(joint['axis']) * np.sign(angle_change)
 
         else:
             drag_point_idx = np.random.randint(0, len(child_mesh.vertices))
@@ -291,6 +693,10 @@ class GAPartNetLoaderV2:
         if joint['type'] == 'continuous':
             upper = max(upper, np.pi)  
             lower = min(lower, -np.pi)
+        
+        # Protect against weird limits
+        if upper <= lower:
+             upper = lower + 1.0
 
         if upper > lower:
             angles = np.linspace(lower, upper, num_frames)
@@ -300,14 +706,11 @@ class GAPartNetLoaderV2:
             else:
                 angles = np.linspace(0, np.pi/2, num_frames)  
 
-        print(f"Joint type: {joint['type']}, Range: [{lower:.3f}, {upper:.3f}], Generated angles: {len(angles)} frames")
-
         qr_sequence = []
         qd_sequence = []
 
         for angle in angles:
             if joint['type'] == 'revolute' or joint['type'] == 'continuous':
-                # continuous joint is like revolute but without limits
                 qr, qd = axis_angle_to_dualquat(
                     joint['axis'],
                     joint['origin_xyz'],
@@ -324,24 +727,26 @@ class GAPartNetLoaderV2:
         qr_sequence = np.array(qr_sequence)  # [num_frames, 4]
         qd_sequence = np.array(qd_sequence)  # [num_frames, 4]
 
-        # Combine all parts into initial mesh
-        static_meshes = [mesh for name, mesh in part_meshes.items() if name != child_link]
-        all_meshes = static_meshes + [child_mesh]
-        initial_mesh = trimesh.util.concatenate(all_meshes)
-
-        # Create part mask (which vertices are movable)
-        num_static_verts = sum(mesh.vertices.shape[0] for mesh in static_meshes)
-        num_movable_verts = child_mesh.vertices.shape[0]
-        part_mask = np.concatenate([
-            np.zeros(num_static_verts, dtype=np.int32),
-            np.ones(num_movable_verts, dtype=np.int32)
-        ])
+        # Combine all parts into initial mesh (Static + Combined Movable)
+        if static_meshes_list:
+            static_mesh_combined = trimesh.util.concatenate(static_meshes_list)
+            initial_mesh = trimesh.util.concatenate([static_mesh_combined, child_mesh])
+            
+            # Create part mask (0=static, 1=movable)
+            num_static_verts = len(static_mesh_combined.vertices)
+            num_movable_verts = len(child_mesh.vertices)
+            part_mask = np.concatenate([
+                np.zeros(num_static_verts, dtype=np.int32),
+                np.ones(num_movable_verts, dtype=np.int32)
+            ])
+        else:
+            # Only the moving part is present.
+            initial_mesh = child_mesh
+            part_mask = np.ones(len(child_mesh.vertices), dtype=np.int32)
 
         # Calculate drag vector with trajectory information
-        # Apply dual quaternion sequence to drag point to get trajectory
         drag_trajectory = []
         for qr, qd in zip(qr_sequence, qd_sequence):
-            # Apply current transformation to drag point
             point_rotated = quaternion_rotate(qr, drag_point_start)
             t_vec = 2.0 * quaternion_multiply(qd, quaternion_conjugate(qr))[1:]
             point_transformed = point_rotated + t_vec
@@ -349,27 +754,30 @@ class GAPartNetLoaderV2:
 
         drag_trajectory = np.array(drag_trajectory)  # [num_frames, 3]
 
-        # Multi-tangent: start, mid, end diffs
+        # Multi-tangent
         if len(drag_trajectory) > 2:
             start_tangent = drag_trajectory[1] - drag_trajectory[0]
             mid_idx = len(drag_trajectory) // 2
             mid_tangent = drag_trajectory[mid_idx+1] - drag_trajectory[mid_idx]
             end_tangent = drag_trajectory[-1] - drag_trajectory[-2]
-            trajectory_vectors = np.stack([start_tangent, mid_tangent, end_tangent])  # [3,3]
+            trajectory_vectors = np.stack([start_tangent, mid_tangent, end_tangent])
         else:
-            trajectory_vectors = drag_trajectory[1:] - drag_trajectory[:-1]
+            # Fallback for very short trajectories
+            diff = drag_trajectory[-1] - drag_trajectory[0]
+            trajectory_vectors = np.stack([diff, diff, diff]) # Simple broadcast
 
-        # Improved drag_vector: average tangents * total_length
+        # Improved drag_vector
         diffs = drag_trajectory[1:] - drag_trajectory[:-1]
         lengths = np.linalg.norm(diffs, axis=1)
         total_length = lengths.sum()
         if total_length > 0:
-            avg_dir = np.mean(trajectory_vectors, axis=0)  # Average multi-tangents
-            avg_dir = avg_dir / np.linalg.norm(avg_dir)
+            avg_dir = np.mean(trajectory_vectors, axis=0)
+            avg_dir = avg_dir / (np.linalg.norm(avg_dir) + 1e-8)
             drag_vector = avg_dir * total_length
         else:
             drag_vector = drag_trajectory[-1] - drag_trajectory[0]
 
+        # Rotation Direction & Sign Fix
         rotation_direction = None
         if joint['type'] in ['revolute', 'continuous']:
             if len(angles) >= 2:
@@ -381,12 +789,13 @@ class GAPartNetLoaderV2:
         drag_dir = drag_vector / (np.linalg.norm(drag_vector) + 1e-8)
         relative_point = drag_point_start - joint['origin_xyz']
         cross_axis_drag = np.cross(joint['axis'], drag_dir)
-        rotation_sign = np.sign(np.dot(cross_axis_drag, relative_point)) or 1.0  # Positive if dot >0, else negative
+        rotation_sign = np.sign(np.dot(cross_axis_drag, relative_point)) or 1.0
 
-        rotation_direction = np.array(joint['axis']) * rotation_sign
+        if rotation_direction is None:
+             rotation_direction = np.array(joint['axis'])
 
-        # Apply sign to drag_vector
-        drag_vector = drag_vector * rotation_sign  # If negative, reverse vector
+        rotation_direction = rotation_direction * rotation_sign
+        drag_vector = drag_vector * rotation_sign
 
         return {
             'initial_mesh': initial_mesh,
@@ -396,6 +805,7 @@ class GAPartNetLoaderV2:
             'rotation_direction': rotation_direction,  
             'qr_sequence': qr_sequence,
             'qd_sequence': qd_sequence,
+            'drag_trajectory': drag_trajectory,  # extra field for LMDB checks
             'joint_type': joint['type'],
             'part_mask': part_mask,
             'obj_path': obj_path,
@@ -407,15 +817,20 @@ class GAPartNetLoaderV2:
         return len(self.object_list)
 
 
+# ==============================================================================
+#  DragMeshDatasetV2 (PyTorch Dataset)
+# ==============================================================================
+
 class DragMeshDatasetV2(torch.utils.data.Dataset):
     """
     PyTorch Dataset with Dual Quaternion ground truth.
     """
 
-    def __init__(self, dataset_root: str, num_frames: int = 16, num_points: int = 4096):
+    def __init__(self, dataset_root: str, num_frames: int = 16, num_points: int = 4096, joint_selection: str = "largest_motion"):
         self.loader = GAPartNetLoaderV2(dataset_root)
         self.num_frames = num_frames
         self.num_points = num_points
+        self.joint_selection = joint_selection
 
     def mesh_to_pointcloud(self, mesh: trimesh.Trimesh, num_points: int) -> np.ndarray:
         """Sample point cloud from mesh surface."""
@@ -425,7 +840,6 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
     def normalize_mesh(self, mesh: trimesh.Trimesh) -> Tuple[trimesh.Trimesh, np.ndarray, float]:
         """
         Normalize mesh to unit bounding box centered at origin.
-        Returns normalized mesh, center, and scale for denormalization.
         """
         bounds = mesh.bounds
         center = (bounds[0] + bounds[1]) / 2
@@ -445,7 +859,7 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
         """
         Get a training sample.
         """
-        sample = self.loader.generate_training_sample(idx, self.num_frames)
+        sample = self.loader.generate_training_sample(idx, self.num_frames, joint_selection=self.joint_selection)
 
         center = sample['joint_origin'] 
         bounds = sample['initial_mesh'].bounds
@@ -487,7 +901,6 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
         joint_axis = sample['joint_axis']
         joint_axis = joint_axis / (np.linalg.norm(joint_axis) + 1e-8)
         
-
         original_mesh = sample['initial_mesh']
         vertex_part_mask = sample['part_mask'] # [N_verts]
         
@@ -497,7 +910,6 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
             face_mask_values = vertex_part_mask[face_vertices]
             sampled_part_mask[i] = np.bincount(face_mask_values.astype(int)).argmax()
     
-
         result = {
             'initial_mesh': torch.from_numpy(initial_pc).float(),
             'drag_point': torch.from_numpy(drag_point).float(),
@@ -515,5 +927,10 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
 
         if trajectory_vectors is not None:
             result['trajectory_vectors'] = torch.from_numpy(trajectory_vectors).float()
+            
+        # Propagate drag_trajectory if needed.
+        if 'drag_trajectory' in sample:
+            traj = (sample['drag_trajectory'] - center) / scale
+            result['drag_trajectory'] = torch.from_numpy(traj).float()
 
         return result
