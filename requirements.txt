@@ -1,10 +1,4 @@
-# DragMesh dependencies (single-file).
-#
-# Recommended: use conda env in environment.yml / environment_cpu.yml
-# Then install extra python deps (visualization/UI/logging) via:
-#   pip install -r requirements.txt
-#
-# NOTE: We keep core deps here too so venv+pip users can install in one shot.
+# DragMesh dependencies 
 
 # Core (runtime)
 numpy

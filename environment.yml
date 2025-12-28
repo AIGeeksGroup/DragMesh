@@ -1,0 +1,19 @@
+name: dragmesh
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # PyTorch + CUDA (adjust if your system uses a different CUDA runtime)
+  - pytorch=2.4.1
+  - torchvision
+  - pytorch-cuda=12.1
+  # Basic scientific stack (most other deps are installed via pip below)
+  - numpy
+  - tqdm
+  - pyyaml
+  - pip:
+      - -r requirements.txt
+
