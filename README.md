@@ -192,6 +192,9 @@ Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manua
 | Microwave door | Revolute joint inference with FiLM conditioned motion generation. |
 | Bucket handle | High curvature rotations showing the benefit of dual quaternions. |
 
+## 📄 Teaser Presentation
+![DragMesh articulation teaser](assets/articulation_teaser.png)
+
 ## 🎬 Demo Gallery
 
 **Translational drags**
