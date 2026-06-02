@@ -12,7 +12,8 @@ Official repository for the paper
 > [!NOTE]
 >  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.
 
-
+## 📄 Teaser Presentation
+![DragMesh articulation teaser](assets/articulation_teaser.png)
 
 https://github.com/user-attachments/assets/428b0d36-50ab-4b46-ab17-679ad22c826b
 
