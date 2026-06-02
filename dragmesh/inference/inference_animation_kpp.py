@@ -8,20 +8,36 @@ overrides joint parameters using a Keypoint Predictor (KPP): joint_type / joint_
 import argparse
 import os
 import sys
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 import trimesh
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from modules.data_loader_v2 import GAPartNetLoaderV2
-from modules.predictor import KeypointPredictor
+from dragmesh.data.data_loader_v2 import GAPartNetLoaderV2
+from dragmesh.models.predictor import KeypointPredictor
+from dragmesh.utils.kpp_normalization import (
+    KPP_ORIGIN_NORMALIZATION,
+    denormalize_points,
+    mesh_center_scale,
+    normalize_points,
+    normalize_vector,
+)
 
 # Reuse the canonical animation logic (single-interaction trajectory, loop_mode, headless rendering
 # fallback, and animated GLB injection).
-from inference_animation import FixedGAPartNetLoader, load_model, run_animation_from_sample
+from dragmesh.inference.inference_animation import FixedGAPartNetLoader, load_model, run_animation_from_sample
+
+
+def _parse_vec3(value: Optional[str]) -> Optional[np.ndarray]:
+    if value is None:
+        return None
+    parts = [p for p in value.replace(",", " ").split() if p]
+    if len(parts) != 3:
+        raise ValueError(f"Expected a 3D vector, got: {value!r}")
+    return np.asarray([float(p) for p in parts], dtype=np.float32)
 
 
 def load_kpp_model(checkpoint_path: str, device: torch.device) -> Optional[KeypointPredictor]:
@@ -31,6 +47,14 @@ def load_kpp_model(checkpoint_path: str, device: torch.device) -> Optional[Keypo
         print(f"Error: unable to load KPP checkpoint: {exc}")
         return None
     config = checkpoint.get('config', {})
+    ckpt_norm = config.get('origin_normalization', config.get('kpp_origin_normalization'))
+    if ckpt_norm != KPP_ORIGIN_NORMALIZATION:
+        print(
+            "[WARN] KPP checkpoint origin_normalization="
+            f"{ckpt_norm!r}; expected {KPP_ORIGIN_NORMALIZATION!r}. "
+            "Old checkpoints trained with joint-origin-centered labels predict a near-zero origin "
+            "in the normalized frame and should be retrained after rebuilding LMDB."
+        )
     kpp_model = KeypointPredictor(
         use_mask=config.get('use_mask', True),
         use_drag=config.get('use_drag', True)
@@ -51,20 +75,16 @@ def _prepare_kpp_inputs_from_mesh(initial_mesh: trimesh.Trimesh,
                                   drag_vector_world: np.ndarray,
                                   num_points: int = 4096) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
     """
-    Match the normalization protocol used by `inference_animation.py`:
+    Match the KPP training normalization protocol:
     - Normalize the mesh with bbox center/scale
     - Sample a surface point cloud with `num_points`
     - Derive per-sampled-point mask via face -> vertex majority vote (0/1)
     - Normalize drag point/vector with the same center/scale
     """
-    bounds = initial_mesh.bounds
-    center = (bounds[0] + bounds[1]) / 2.0
-    scale = (bounds[1] - bounds[0]).max()
-    if scale < 1e-6:
-        scale = 1.0
+    center, scale = mesh_center_scale(initial_mesh)
 
     mesh_norm = initial_mesh.copy()
-    mesh_norm.vertices = (mesh_norm.vertices - center) / scale
+    mesh_norm.vertices = normalize_points(mesh_norm.vertices, center, scale)
 
     pc, face_indices = trimesh.sample.sample_surface(mesh_norm, num_points)
 
@@ -75,8 +95,8 @@ def _prepare_kpp_inputs_from_mesh(initial_mesh: trimesh.Trimesh,
         face_mask_values = vertex_part_mask[face_vertices].astype(np.int32)
         sampled_mask[i] = float(np.bincount(face_mask_values).argmax())
 
-    drag_point_norm = (np.asarray(drag_point_world) - center) / scale
-    drag_vector_norm = np.asarray(drag_vector_world) / scale
+    drag_point_norm = normalize_points(drag_point_world, center, scale)
+    drag_vector_norm = normalize_vector(drag_vector_world, scale)
     return pc, sampled_mask, drag_point_norm, drag_vector_norm, center, scale
 
 
@@ -91,7 +111,11 @@ def run_kpp_animation(model,
                       force_rotation: bool,
                       fps: float,
                       loop_mode: str,
-                      use_kpp_type: bool = True):
+                      use_kpp_type: bool = True,
+                      drag_point_world: Optional[Sequence[float]] = None,
+                      drag_vector_world: Optional[Sequence[float]] = None,
+                      origin_prior_world: Optional[Sequence[float]] = None,
+                      origin_from_drag_start: bool = False):
     sample = loader.generate_training_sample(sample_idx, num_frames=num_frames)
     if sample is None:
         print(f"Error: unable to generate a valid sample for index={sample_idx}.")
@@ -101,6 +125,17 @@ def run_kpp_animation(model,
     vertex_part_mask = np.asarray(sample['part_mask'])
     if vertex_part_mask.dtype != bool:
         vertex_part_mask = vertex_part_mask.astype(bool)
+
+    drag_point = np.asarray(
+        sample['drag_point'] if drag_point_world is None else drag_point_world,
+        dtype=np.float32,
+    )
+    drag_vector = np.asarray(
+        sample['drag_vector'] if drag_vector_world is None else drag_vector_world,
+        dtype=np.float32,
+    )
+    if drag_point_world is not None or drag_vector_world is not None:
+        print(f"[Input] override_drag_point={drag_point.tolist()}, override_drag_vector={drag_vector.tolist()}")
 
     # Default: use GT joint parameters (same behavior as inference_animation.py).
     joint_type_str = sample['joint_type']
@@ -113,8 +148,8 @@ def run_kpp_animation(model,
         pc, sampled_mask, drag_point_norm, drag_vector_norm, center, scale = _prepare_kpp_inputs_from_mesh(
             initial_mesh=initial_mesh,
             vertex_part_mask=vertex_part_mask.astype(np.int32),
-            drag_point_world=np.asarray(sample['drag_point']),
-            drag_vector_world=np.asarray(sample['drag_vector']),
+            drag_point_world=drag_point,
+            drag_vector_world=drag_vector,
             num_points=4096
         )
 
@@ -130,7 +165,7 @@ def run_kpp_animation(model,
         pred_axis_np = pred_axis.squeeze(0).detach().cpu().numpy().astype(np.float32)
         pred_axis_np = pred_axis_np / (np.linalg.norm(pred_axis_np) + 1e-8)
         pred_origin_norm = pred_origin.squeeze(0).detach().cpu().numpy().astype(np.float32)
-        pred_origin_world = pred_origin_norm * scale + center
+        pred_origin_world = denormalize_points(pred_origin_norm, center, scale)
 
         joint_axis = pred_axis_np
         joint_origin = pred_origin_world
@@ -138,6 +173,14 @@ def run_kpp_animation(model,
             joint_type_int = int(torch.argmax(pred_type_logits, dim=-1).item())
             joint_type_str = 'revolute' if joint_type_int == 0 else 'prismatic'
 
+        if origin_prior_world is not None:
+            joint_origin = np.asarray(origin_prior_world, dtype=np.float32)
+            print("[KPP] origin_prior_world enabled; using explicit 3D anchor as joint origin prior.")
+        elif origin_from_drag_start:
+            joint_origin = drag_point.astype(np.float32)
+            print("[KPP] origin_from_drag_start enabled; using input drag point as joint origin prior.")
+
+        print(f"[KPP] origin_normalization={KPP_ORIGIN_NORMALIZATION}, center={center.tolist()}, scale={float(scale)}")
         print(f"[KPP] joint_type={joint_type_str}, axis={joint_axis.tolist()}, origin={joint_origin.tolist()}")
 
     if force_rotation:
@@ -153,8 +196,8 @@ def run_kpp_animation(model,
     sample_for_anim = {
         'initial_mesh': initial_mesh,
         'part_mask': vertex_part_mask,
-        'drag_point': np.asarray(sample['drag_point']),
-        'drag_vector': np.asarray(sample['drag_vector']),
+        'drag_point': drag_point,
+        'drag_vector': drag_vector,
         'joint_type': joint_type_str,
         'joint_axis': joint_axis,
         'joint_origin': joint_origin,
@@ -196,6 +239,14 @@ def parse_args():
     parser.add_argument('--use_kpp_type', action='store_true', default=True, help='Use KPP predicted joint type (default: True)')
     parser.add_argument('--no_use_kpp_type', action='store_false', dest='use_kpp_type',
                         help='Do not override joint type; only use KPP axis/origin.')
+    parser.add_argument('--drag_point_world', type=str, default=None,
+                        help='Optional manifest/user 3D drag start as "x,y,z" in world coordinates.')
+    parser.add_argument('--drag_vector_world', type=str, default=None,
+                        help='Optional manifest/user 3D drag vector as "x,y,z" in world coordinates.')
+    parser.add_argument('--origin_from_drag_start', action='store_true',
+                        help='Use the input 3D drag start as an explicit joint-origin prior.')
+    parser.add_argument('--origin_prior_world', type=str, default=None,
+                        help='Optional explicit 3D origin prior as "x,y,z"; does not alter KPP drag input.')
 
     parser.add_argument('--fps', type=float, default=5.0, help='animation playback fps (smaller = slower)')
     parser.add_argument('--loop_mode', type=str, default='pingpong', choices=['once', 'pingpong'],
@@ -242,7 +293,11 @@ def main():
         force_rotation=args.force_rotation,
         fps=args.fps,
         loop_mode=args.loop_mode,
-        use_kpp_type=args.use_kpp_type
+        use_kpp_type=args.use_kpp_type,
+        drag_point_world=_parse_vec3(args.drag_point_world),
+        drag_vector_world=_parse_vec3(args.drag_vector_world),
+        origin_prior_world=_parse_vec3(args.origin_prior_world),
+        origin_from_drag_start=args.origin_from_drag_start
     )
 
 

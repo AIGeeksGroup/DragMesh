@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import numpy as np
 import trimesh
 from typing import Tuple, List, Dict
-from modules.dual_quaternion import (
+from dragmesh.geometry.dual_quaternion import (
     dual_quaternion_apply,
     dual_quaternion_to_quaternion_translation,
     quaternion_translation_apply

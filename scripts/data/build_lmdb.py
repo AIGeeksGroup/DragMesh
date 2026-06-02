@@ -1,5 +1,5 @@
 # -------------------------------------------------------------------
-# scripts/build_lmdb.py
+# scripts/data/build_lmdb.py
 # -------------------------------------------------------------------
 """
 Build LMDB databases for VAE/KPP training.
@@ -16,12 +16,13 @@ import numpy as np
 import trimesh
 from torch.utils.data import Dataset, random_split, Subset
 
-# Ensure modules and utils are in path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Ensure the repository root is importable
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import the GAPartNet loader.
-from modules.data_loader_v2 import GAPartNetLoaderV2
-from utils.balanced_dataset_utils import build_vae_lmdb
+from dragmesh.data.data_loader_v2 import GAPartNetLoaderV2
+from dragmesh.data.balanced_dataset_utils import build_vae_lmdb
+from dragmesh.utils.kpp_normalization import bbox_center_scale, normalize_points, normalize_vector
 
 class SmartProcessingDataset(Dataset):
     """
@@ -98,8 +99,10 @@ class SmartProcessingDataset(Dataset):
                 return None  # tell build_vae_lmdb to skip this sample
             
             # 3) === Normalization (points already sampled by the loader) ===
+            # KPP predicts the origin in the normalized point-cloud frame.  This
+            # frame must be available at inference, so center on the object bbox,
+            # not the GT joint origin.
             points = raw['initial_mesh']  # [N,3] ndarray
-            center = raw['joint_origin']  # center at the joint origin
 
             # Compute scale: prefer loader-provided bounds; otherwise use point-cloud bounds.
             if 'bounds_min' in raw and 'bounds_max' in raw:
@@ -108,10 +111,9 @@ class SmartProcessingDataset(Dataset):
             else:
                 bmin = points.min(axis=0)
                 bmax = points.max(axis=0)
-            scale = (bmax - bmin).max()
-            if scale < 1e-6: scale = 1.0
+            center, scale = bbox_center_scale(bmin, bmax)
 
-            points = ((points - center) / scale).astype(np.float32)
+            points = normalize_points(points, center, scale)
 
             # 4) Part mask is already point-level (0=static, 1=movable).
             p_mask = raw['part_mask'].astype(np.int32)
@@ -119,19 +121,22 @@ class SmartProcessingDataset(Dataset):
             # 5) Pack output dict
             out = {
                 'initial_mesh': points.astype(np.float32, copy=False),
-                'drag_point': ((raw['drag_point'] - center) / scale).astype(np.float32),
-                'drag_vector': (raw['drag_vector'] / scale).astype(np.float32),
+                'drag_point': normalize_points(raw['drag_point'], center, scale),
+                'drag_vector': normalize_vector(raw['drag_vector'], scale),
                 'qr_gt': raw['qr_sequence'].astype(np.float32),
                 'qd_gt': (raw['qd_sequence'] / scale).astype(np.float32),
                 'joint_type': 0 if joint_type in ['revolute', 'continuous'] else 1,
                 'joint_axis': raw['joint_axis'].astype(np.float32),
-                'joint_origin': ((raw['joint_origin'] - center) / scale).astype(np.float32), 
+                'joint_origin': normalize_points(raw['joint_origin'], center, scale),
                 'part_mask': p_mask.astype(np.float32),
+                'norm_center': center.astype(np.float32),
+                'norm_scale': np.array(scale, dtype=np.float32),
+                'origin_normalization_version': np.array(1, dtype=np.int64),
                 
                 # Extra fields (used by loss/augmentation)
                 'rotation_direction': raw['rotation_direction'].astype(np.float32),
                 'trajectory_vectors': (raw['trajectory_vectors'] / scale).astype(np.float32),
-                'drag_trajectory': ((raw['drag_trajectory'] - center) / scale).astype(np.float32)
+                'drag_trajectory': normalize_points(raw['drag_trajectory'], center, scale)
             }
             return out
 
@@ -223,7 +228,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_prefix', type=str, required=True,
                         help='Prefix for output LMDBs')
     parser.add_argument('--config', type=str,
-                        default='config/category_split_v2.json',
+                        default='configs/category_split_v2.json',
                         help='Category split configuration')
     parser.add_argument('--num_frames', type=int, default=16,
                         help='Number of trajectory frames')

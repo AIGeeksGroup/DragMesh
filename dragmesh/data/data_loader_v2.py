@@ -8,6 +8,8 @@ import gc
 import torch
 import torch.nn.functional as F
 
+from dragmesh.utils.kpp_normalization import mesh_center_scale, normalize_points, normalize_vector
+
 
 
 def axis_angle_to_dualquat(axis: np.ndarray, origin: np.ndarray, angle: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -861,20 +863,18 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
         """
         sample = self.loader.generate_training_sample(idx, self.num_frames, joint_selection=self.joint_selection)
 
-        center = sample['joint_origin'] 
-        bounds = sample['initial_mesh'].bounds
-        scale = (bounds[1] - bounds[0]).max()
-        if scale < 1e-6:
-            scale = 1.0
+        # Use an inference-reproducible frame for KPP origin labels.  The
+        # previous joint-origin-centered frame made the origin target always 0.
+        center, scale = mesh_center_scale(sample['initial_mesh'])
 
-        mesh_normalized_verts = (sample['initial_mesh'].vertices - center) / scale
+        mesh_normalized_verts = normalize_points(sample['initial_mesh'].vertices, center, scale)
         mesh_normalized = trimesh.Trimesh(vertices=mesh_normalized_verts, 
                                           faces=sample['initial_mesh'].faces)
         
         initial_pc, face_idx = trimesh.sample.sample_surface(mesh_normalized, self.num_points)
 
-        drag_point = (sample['drag_point'] - center) / scale
-        drag_vector = sample['drag_vector'] / scale
+        drag_point = normalize_points(sample['drag_point'], center, scale)
+        drag_vector = normalize_vector(sample['drag_vector'], scale)
 
         rotation_direction = sample.get('rotation_direction')
         if rotation_direction is not None:
@@ -884,7 +884,7 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
         if trajectory_vectors is not None:
             trajectory_vectors = np.array(trajectory_vectors)  
         
-        joint_origin_normalized = (sample['joint_origin'] - center) / scale
+        joint_origin_normalized = normalize_points(sample['joint_origin'], center, scale)
 
         if sample['joint_type'] == 'revolute' or sample['joint_type'] == 'continuous':
             joint_type = 0
@@ -918,8 +918,11 @@ class DragMeshDatasetV2(torch.utils.data.Dataset):
             'qd_gt': torch.from_numpy(qd_gt).float(),
             'joint_type': torch.tensor(joint_type).long(),
             'joint_axis': torch.from_numpy(joint_axis).float(),
-            'joint_origin': torch.from_numpy(joint_origin_normalized).float(), 
-            'part_mask': torch.from_numpy(sampled_part_mask).float()
+            'joint_origin': torch.from_numpy(joint_origin_normalized).float(),
+            'part_mask': torch.from_numpy(sampled_part_mask).float(),
+            'norm_center': torch.from_numpy(center).float(),
+            'norm_scale': torch.tensor(scale).float(),
+            'origin_normalization_version': torch.tensor(1).long(),
         }
 
         if rotation_direction is not None:
