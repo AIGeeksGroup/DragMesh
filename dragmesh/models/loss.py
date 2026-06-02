@@ -1,5 +1,5 @@
 # -------------------------------------------------------------------
-#  modules/loss.py
+#  dragmesh/models/loss.py
 # -------------------------------------------------------------------
 
 import torch
@@ -11,7 +11,7 @@ try:
     import chamfer3D.dist_chamfer_3D  # type: ignore
 except Exception:
     chamfer3D = None
-from modules.dual_quaternion import (
+from dragmesh.geometry.dual_quaternion import (
     dual_quaternion_norm, quaternion_mul, 
     quaternion_conjugate, quaternion_to_matrix
 )

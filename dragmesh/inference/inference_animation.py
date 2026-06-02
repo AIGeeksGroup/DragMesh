@@ -10,16 +10,16 @@ import trimesh
 import argparse
 from tqdm import tqdm
 from difflib import get_close_matches
-import tempfile 
+import tempfile
 import copy
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import torch.nn.functional as F
 import math
 
-from modules.model_v2 import DualQuaternionVAE 
-from modules.data_loader_v2 import GAPartNetLoaderV2
-from modules.dual_quaternion import dual_quaternion_apply, quaternion_to_axis_angle, quaternion_multiply, quaternion_conjugate
+from dragmesh.models.model_v2 import DualQuaternionVAE
+from dragmesh.data.data_loader_v2 import GAPartNetLoaderV2
+from dragmesh.geometry.dual_quaternion import dual_quaternion_apply, quaternion_to_axis_angle, quaternion_multiply, quaternion_conjugate
 
 # --- Offscreen rendering (headless fallback) ---
 _OFFSCREEN_RENDERING_BROKEN = False
@@ -122,7 +122,7 @@ def create_gif(mesh_sequence, output_path, resolution=(600, 600), fps=15):
     try:
         scene = pyrender.Scene(ambient_light=[0.1, 0.1, 0.3], bg_color=[255, 255, 255])
         first_mesh = mesh_sequence[0]
-        
+
         camera_pose = np.eye(4)
         zoom = np.max(first_mesh.extents) * 2.5
         camera_pose[2, 3] = zoom
@@ -181,7 +181,7 @@ def create_animation_video_local(mesh_sequence, output_path, resolution=(600, 60
     try:
         scene = pyrender.Scene(ambient_light=[0.1, 0.1, 0.3], bg_color=[255, 255, 255])
         first_mesh = mesh_sequence[0]
-        
+
         camera_pose = np.eye(4)
         zoom = np.max(first_mesh.extents) * 2.5
         camera_pose[2, 3] = zoom
@@ -220,7 +220,7 @@ def create_animation_video_local(mesh_sequence, output_path, resolution=(600, 60
 
 
 # --- Core: export an animated GLB ---
-def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor, 
+def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor,
                         joint_origin_norm_tensor, scale, center, output_path, fps=10):
     """
     Export an animated GLB with translation/rotation tracks.
@@ -238,13 +238,13 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
 
     # 1) De-normalize joint origin back to world space.
     real_origin = joint_origin_norm_tensor.cpu().numpy() * scale + center
-    
+
     # 2) Split the mesh into static vs moving parts (preserve materials via trimesh submesh).
     try:
         # All faces
         faces = initial_mesh.faces
         vertex_mask = part_mask_np.astype(bool)
-        
+
         # Face assignment: a face is moving iff all its vertices are marked movable.
         # This heuristic works well for rigid part segmentations (e.g., GAPartNet).
         face_mask = vertex_mask[faces].all(axis=1)
@@ -260,11 +260,11 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
         # trimesh.submesh expects face index lists, not boolean masks.
         mesh_moving = initial_mesh.submesh([moving_face_ids], append=True)
         mesh_static = initial_mesh.submesh([static_face_ids], append=True)
-        
+
         # Name nodes for debugging.
         mesh_moving.name = "moving_part"
         mesh_static.name = "static_part"
-        
+
     except Exception as e:
         print(f"Error splitting mesh for GLB: {e}")
         # Fallback: export a static GLB if splitting fails.
@@ -274,33 +274,33 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
     # 3) Pivot adjustment:
     #    A) translate moving vertices so the joint origin becomes (0, 0, 0) in its local frame
     #    B) set the moving node translation back to the joint origin in world space
-    
+
     mesh_moving.vertices -= real_origin
-    
+
     # 4) Build a trimesh.Scene and export a base GLB (trimesh handles material packaging).
     scene = trimesh.Scene()
     scene.add_geometry(mesh_static, node_name='static_node')
-    
+
     # Initial transform: translate the moving node to the joint pivot.
     transform_matrix = np.eye(4)
     transform_matrix[:3, 3] = real_origin
     scene.add_geometry(mesh_moving, node_name='moving_node', transform=transform_matrix)
-    
+
     # Export a temporary GLB (trimesh performs binary conversion and material handling).
     fd, temp_glb_path = tempfile.mkstemp(suffix='.glb')
     os.close(fd)
     scene.export(temp_glb_path)
-    
+
     # 5) Inject animation data via pygltflib.
     gltf = GLTF2().load(temp_glb_path)
-    
+
     # Locate the moving node index.
     moving_node_idx = -1
     for i, node in enumerate(gltf.nodes):
         if node.name == 'moving_node':
             moving_node_idx = i
             break
-    
+
     # Fallback: trimesh may rename nodes; the last node is typically the last added.
     if moving_node_idx == -1:
          moving_node_idx = len(gltf.nodes) - 1
@@ -322,7 +322,7 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
             node.scale = [1.0, 1.0, 1.0]
     except Exception:
         pass
-    
+
     # A) Rotation: DualQuaternion real part -> glTF quaternion.
     # PyTorch: [w, x, y, z] -> glTF: [x, y, z, w]
     qr_seq = qr_seq_tensor.detach().cpu().numpy().astype(np.float32)
@@ -335,16 +335,16 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
     rotations[:, 1] = qr_seq[:, 2] # y
     rotations[:, 2] = qr_seq[:, 3] # z
     rotations[:, 3] = qr_seq[:, 0] # w
-    
+
     # B) Translation:
     # The node is already positioned at `real_origin`. The DQ translation is an offset
     # in normalized space, so per-frame translation is: real_origin + t * scale.
-    
+
     qr_conj = quaternion_conjugate(qr_seq_tensor)
     t_q = 2.0 * quaternion_multiply(qd_seq_tensor, qr_conj)
     t_vec_norm = t_q[:, 1:].cpu().numpy() # [N, 3]
-    t_vec_real = t_vec_norm * scale 
-    
+    t_vec_real = t_vec_norm * scale
+
     translations = np.zeros((num_frames, 3), dtype=np.float32)
     for i in range(num_frames):
         translations[i] = real_origin + t_vec_real[i]
@@ -352,7 +352,7 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
     # --- Write binary buffer ---
     blob = bytearray(gltf.binary_blob())
     _pad_to_4bytes(blob)
-    
+
     # 1. Times Input
     times_bytes = times.tobytes()
     times_offset = len(blob)
@@ -365,7 +365,7 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
         bufferView=times_view_idx, componentType=pygltflib.FLOAT, count=num_frames, type=pygltflib.SCALAR,
         min=[float(times.min())], max=[float(times.max())]
     ))
-    
+
     # 2. Translations Output
     trans_bytes = translations.tobytes()
     trans_offset = len(blob)
@@ -378,7 +378,7 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
         bufferView=trans_view_idx, componentType=pygltflib.FLOAT, count=num_frames, type=pygltflib.VEC3,
         min=translations.min(axis=0).tolist(), max=translations.max(axis=0).tolist()
     ))
-    
+
     # 3. Rotations Output
     rot_bytes = rotations.tobytes()
     rot_offset = len(blob)
@@ -390,35 +390,35 @@ def export_animated_glb(initial_mesh, part_mask_np, qr_seq_tensor, qd_seq_tensor
     gltf.accessors.append(pygltflib.Accessor(
         bufferView=rot_view_idx, componentType=pygltflib.FLOAT, count=num_frames, type=pygltflib.VEC4
     ))
-    
+
     # Update blob length.
-    gltf.set_binary_blob(blob) 
+    gltf.set_binary_blob(blob)
     try:
         if gltf.buffers and len(gltf.buffers) > 0:
             gltf.buffers[0].byteLength = len(blob)
     except Exception:
         pass
-    
+
     # --- Create animation object ---
     anim = pygltflib.Animation(name="Interaction")
-    
+
     # Translation Channel
     anim.samplers.append(pygltflib.AnimationSampler(input=times_accessor_idx, output=trans_accessor_idx, interpolation=pygltflib.LINEAR))
     anim.channels.append(pygltflib.AnimationChannel(sampler=0, target=pygltflib.AnimationChannelTarget(node=moving_node_idx, path="translation")))
-    
+
     # Rotation Channel
     anim.samplers.append(pygltflib.AnimationSampler(input=times_accessor_idx, output=rot_accessor_idx, interpolation=pygltflib.LINEAR))
     anim.channels.append(pygltflib.AnimationChannel(sampler=1, target=pygltflib.AnimationChannelTarget(node=moving_node_idx, path="rotation")))
-    
+
     gltf.animations.append(anim)
-    
+
     # Save final GLB.
     gltf.save(output_path)
-    
+
     # Cleanup.
     if os.path.exists(temp_glb_path):
         os.remove(temp_glb_path)
-        
+
     print(f" Animated GLB saved: {output_path}")
 
 
@@ -447,29 +447,29 @@ def load_model(checkpoint_path, device, args):
     except Exception as e:
         print(f"Error: unable to load checkpoint: {e}")
         return None, 16
-    
+
     if 'model_state_dict' not in checkpoint:
         print("Error: checkpoint is missing 'model_state_dict'.")
         return None, 16
-        
+
     model_state_dict = checkpoint['model_state_dict']
     config = checkpoint.get('config', {})
-    
+
     latent_dim = config.get('latent_dim', args.latent_dim)
     num_frames = args.num_frames if args.num_frames is not None else config.get('num_frames', 16)
     transformer_layers = config.get('transformer_layers', args.transformer_layers)
     transformer_heads = config.get('transformer_heads', args.transformer_heads)
-    
+
     print(f"\n=== Initializing VAE Model ===")
     print(f" Info: layers={transformer_layers}, heads={transformer_heads}, latent={latent_dim}")
-    
+
     model = DualQuaternionVAE(
         latent_dim=latent_dim,
         num_frames=num_frames,
         transformer_layers=transformer_layers,
         transformer_heads=transformer_heads
     ).to(device)
-    
+
     from collections import OrderedDict
     new_state_dict = OrderedDict()
     for k, v in model_state_dict.items():
@@ -478,14 +478,14 @@ def load_model(checkpoint_path, device, args):
             new_state_dict[name] = v
         else:
             new_state_dict[k] = v
-    
+
     try:
         model.load_state_dict(new_state_dict, strict=True)
         print(f" Loaded with strict=True.")
     except RuntimeError as e:
         print(f"Warning: Strict load failed, trying loose load. Error: {str(e)[:100]}...")
         model.load_state_dict(new_state_dict, strict=False)
-            
+
     model.eval()
     return model, num_frames
 
@@ -520,9 +520,9 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
 
     initial_mesh_normalized = initial_mesh.copy()
     initial_mesh_normalized.vertices = (initial_mesh_normalized.vertices - center) / scale
-    
+
     initial_pc, face_indices = trimesh.sample.sample_surface(initial_mesh_normalized, 4096)
-    
+
     sampled_part_mask_np = np.zeros(4096, dtype=np.float32)
     for i, fid in enumerate(face_indices):
         face_vertices = initial_mesh.faces[fid]
@@ -535,13 +535,13 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
     drag_point_norm = (sample['drag_point'] - center) / scale
     drag_vector_norm = sample['drag_vector'] / scale
     joint_type_str = sample['joint_type']
-    
+
     joint_type = 0 if joint_type_str in ['revolute', 'continuous'] else 1
     if force_rotation:
         joint_type = 0
         print("*** Forcing rotation mode (joint_type=0) ***")
-    
-    joint_axis_gt = sample['joint_axis'] 
+
+    joint_axis_gt = sample['joint_axis']
     joint_origin_gt_norm = (sample['joint_origin'] - center) / scale
 
     rotation_direction_gt = sample.get('rotation_direction')
@@ -587,7 +587,7 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
     chosen_id = os.path.basename(loader.object_list[sample_idx])
     output_dir_id = os.path.join(output_dir, chosen_id)
     os.makedirs(output_dir_id, exist_ok=True)
-    
+
     # Export the static initial mesh as a reference.
     try:
         initial_mesh.export(os.path.join(output_dir_id, 'initial_static.glb'))
@@ -596,10 +596,10 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
 
     # --- 6) VAE decoder (multi-sample) ---
     print(f"\nRunning model DECODER ({num_samples_to_gen} times)...")
-    
+
     for s_idx in range(num_samples_to_gen):
         print(f"--- Sample {s_idx+1}/{num_samples_to_gen} ---")
-        
+
         with torch.no_grad():
             if s_idx == 0 and num_samples_to_gen > 1:
                 z = mu
@@ -607,30 +607,30 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
                 z = model.reparameterize(mu, logvar)
 
             pred_qr_seq, pred_qd_seq = model.decode(z, joint_feat, joint_axis_tensor, joint_type_tensor)
-        
+
         pred_qr_seq = pred_qr_seq.squeeze(0)
         pred_qd_seq = pred_qd_seq.squeeze(0)
 
         # --- 7) Apply hard constraints & build a single-interaction trajectory ---
         if joint_type == 0: # rotation
-            pred_qd_seq = torch.zeros_like(pred_qd_seq) 
+            pred_qd_seq = torch.zeros_like(pred_qd_seq)
             joint_axis_expanded = joint_axis_tensor.expand(pred_qr_seq.shape[0], -1)
             pred_qr_seq = project_rotation_to_axis(pred_qr_seq, joint_axis_expanded)
-        
+
         elif joint_type == 1: # translation
             identity_qr = torch.tensor([1.0, 0.0, 0.0, 0.0], device=device)
             pred_qr_seq = identity_qr.unsqueeze(0).expand(pred_qr_seq.shape[0], -1)
-            
+
             # Project translation onto the joint axis.
             pred_qr_conj = quaternion_conjugate(pred_qr_seq)
             pred_t_q = 2.0 * quaternion_multiply(pred_qd_seq, pred_qr_conj)
             pred_t_vec = pred_t_q[..., 1:]
-            
+
             axis_vec = joint_axis_tensor.squeeze(0)
             dot_prod = torch.sum(pred_t_vec * axis_vec, dim=-1, keepdim=True)
             t_parallel = dot_prod * axis_vec
             pred_qd_seq = torch.cat([torch.zeros_like(pred_t_vec[..., 0:1]), t_parallel], dim=-1) * 0.5
-        
+
         # --- Generate a "single interaction" trajectory (avoid cumulative spinning) ---
         t_values = _make_loop_t_values(num_frames, loop_mode=loop_mode, device=device)
         if joint_type == 0:  # Rotation: Identity -> final pose (NLERP)
@@ -650,9 +650,9 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
 
         # --- 8) Render video & GIF (best-effort) ---
         base_output_path = os.path.join(output_dir_id, f'predicted_z_{s_idx}')
-        
+
         pred_mesh_sequence = []
-        
+
         # Precompute the mesh sequence for rendering.
         joint_origin_t = joint_origin_tensor.squeeze(0)
         movable_verts = verts_normalized_torch = torch.from_numpy(initial_mesh_normalized.vertices).float().to(device)
@@ -661,28 +661,28 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
         for i in range(num_frames):
             qr = pred_qr_seq[i]
             qd = pred_qd_seq[i]
-            
+
             # Apply dual-quaternion transform to the movable part only.
             # 1) gather movable vertices
             current_movable_verts = movable_verts[part_mask_bool_idx_torch]
             current_movable_verts_shifted = current_movable_verts - joint_origin_t
-            
+
             # 2) transform
             transformed_movable = dual_quaternion_apply((qr, qd), current_movable_verts_shifted)
             transformed_movable = transformed_movable + joint_origin_t
-            
+
             # 3) scatter back to the full mesh
             deformed_verts = movable_verts.clone()
             deformed_verts[part_mask_bool_idx_torch] = transformed_movable
-            
+
             # 4) de-normalize to world scale
             denormalized_verts = deformed_verts.cpu().numpy() * scale + center
-            
+
             # 5) build a mesh while preserving materials
             pred_mesh = trimesh.Trimesh(vertices=denormalized_verts, faces=initial_mesh.faces, process=False)
             pred_mesh.visual = initial_mesh.visual
             pred_mesh_sequence.append(pred_mesh)
-            
+
         # Render video/GIF. Smaller fps -> slower playback. pingpong is more suitable for looping viewers.
         create_animation_video_local(pred_mesh_sequence, base_output_path + '.mp4', fps=fps)
         create_gif(pred_mesh_sequence, base_output_path + '.gif', fps=fps)
@@ -740,7 +740,7 @@ def main():
         return
 
     idx = ids_list.index(args.sample_id)
-    
+
     model, actual_num_frames = load_model(args.checkpoint, device, args)
     if model is None: return
 

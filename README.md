@@ -1,16 +1,16 @@
 # <img src="./assets/dragmesh_logo.png" alt="DragMesh logo" width="60"/> DragMesh: Interactive 3D Generation Made Easy
 
-Official repository for the paper 
-> **DragMesh: Interactive 3D Generation Made Easy**. 
->  
+Official repository for the paper
+> **DragMesh: Interactive 3D Generation Made Easy**.
+>
 > [Tianshan Zhang](https://neptune-t.github.io/aca-web-html/)\*, [Zeyu Zhang](https://steve-zeyu-zhang.github.io/)\*†, [Hao Tang](https://ha0tang.github.io/)<sup>#</sup>
-> 
-> \*Equal contribution. †Project lead. <sup>#</sup>Corresponding author. 
-> 
+>
+> \*Equal contribution. †Project lead. <sup>#</sup>Corresponding author.
+>
 > ### [Paper](https://www.arxiv.org/abs/2512.06424) | [Website](https://aigeeksgroup.github.io/DragMesh) | [Models](https://huggingface.co/AIGeeksGroup/DragMesh) | [HF Paper](https://huggingface.co/papers/2512.06424)
 
-> [!NOTE]  
->  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.  
+> [!NOTE]
+>  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.
 
 
 
@@ -55,6 +55,7 @@ It targets Python 3.10, CUDA 12.1, and PyTorch 2.4.1 :
 conda env create -f environment.yml
 conda activate dragmesh
 conda env update -f environment.yml --prune
+pip install -e .
 ```
 
 The spec already installs trimesh, pyrender, pygltflib, viser, Objaverse, SAPIEN, pytorch3d, and tiny-cuda-nn.
@@ -71,10 +72,10 @@ cd ..
 
 ## 📦 Data Preparation (GAPartNet)
 
-> [!NOTE]  
+> [!NOTE]
 >  We have placed the built LMDB train and validation datasets at the following [link](https://huggingface.co/AIGeeksGroup/DragMesh). If you don't want to build them yourself, you can download them directly.
 
-1. Visit https://pku-epic.github.io/GAPartNet/ and download the articulated assets for the categories listed in `config/category_split_v2.json`.  
+1. Visit https://pku-epic.github.io/GAPartNet/ and download the articulated assets for the categories listed in `configs/category_split_v2.json`.
 2. Arrange files so that each object folder contains `mobility_annotation_gapartnet.urdf`, `meta.json`, and textured meshes (`*.obj`). Example:
    ```
    data/gapartnet/<object_id>/
@@ -84,10 +85,10 @@ cd ..
    ```
 3. Convert to LMDB for fast training IO:
    ```bash
-   python utils/build_lmdb.py \
+   python scripts/data/build_lmdb.py \
      --dataset_root data/gapartnet \
      --output_prefix data/dragmesh \
-     --config config/category_split_v2.json \
+     --config configs/category_split_v2.json \
      --num_frames 16 \
      --num_points 4096
    # Produces data/dragmesh_train.lmdb and data/dragmesh_val.lmdb
@@ -95,15 +96,15 @@ cd ..
    Optional knobs:
    - `--joint_selection largest_motion`: chooses a representative joint by motion span × moving geometry scale.
    - `--joint_selection first` / `random`: deterministic / random joint selection.
-4. Use `utils/balanced_dataset_utils.get_motion_type_weights` with `WeightedRandomSampler` if you need balanced revolute/prismatic sampling.
+4. Use `dragmesh.data.balanced_dataset_utils.get_motion_type_weights` with `WeightedRandomSampler` if you need balanced revolute/prismatic sampling.
 
 ## 🧠 Training
 ### Dual Quaternion VAE
 ```bash
-python scripts/train_vae_v2.py \
+python scripts/train/train_vae_v2.py \
   --lmdb_train_path data/dragmesh_train.lmdb \
   --lmdb_val_path data/dragmesh_val.lmdb \
-  --data_split_json_path config/category_split_v2.json \
+  --data_split_json_path configs/category_split_v2.json \
   --output_dir outputs/vae \
   --num_epochs 300 \
   --batch_size 16 \
@@ -118,10 +119,10 @@ python scripts/train_vae_v2.py \
 
 ### Kinematics Prediction Network (KPP-Net)
 ```bash
-python scripts/train_predictor.py \
+python scripts/train/train_predictor.py \
   --lmdb_train_path data/dragmesh_train.lmdb \
   --lmdb_val_path data/dragmesh_val.lmdb \
-  --data_split_json_path config/category_split_v2.json \
+  --data_split_json_path configs/category_split_v2.json \
   --output_dir outputs/kpp \
   --batch_size 32 \
   --num_epochs 200 \
@@ -130,12 +131,12 @@ python scripts/train_predictor.py \
   --predict_type True
 ```
 
-Both scripts log to TensorBoard and optionally Weights & Biases. Check `modules/loss.py` and `modules/predictor_loss.py` for objective details.
+Both scripts log to TensorBoard and optionally Weights & Biases. Check `dragmesh/models/loss.py` and `dragmesh/models/predictor_loss.py` for objective details.
 
 ## 🧪 Inference
 ### Batch Sweep (dataset mode)
 ```bash
-python inference_animation.py \
+python -m dragmesh.inference.inference_animation \
   --dataset_root data/gapartnet \
   --checkpoint best_model.pth \
   --sample_id 40261 \
@@ -149,7 +150,7 @@ Outputs MP4, GIF, and an animated GLB per object.
 
 ### Batch Sweep (KPP-driven joint parameters)
 ```bash
-python inference_animation_kpp.py \
+python -m dragmesh.inference.inference_animation_kpp \
   --dataset_root data/gapartnet \
   --checkpoint outputs/vae/best_model.pth \
   --kpp_checkpoint outputs/kpp/best_model_kpp.pth \
@@ -163,7 +164,7 @@ python inference_animation_kpp.py \
 
 ### Custom mesh manipulation (manual input)
 ```bash
-python inference_pipeline.py \
+python -m dragmesh.inference.inference_pipeline \
   --mesh_file assets/cabinet.obj \
   --mask_file assets/cabinet_vertex_labels.npy \
   --mask_format vertex \
@@ -177,12 +178,12 @@ python inference_pipeline.py \
   --fps 5 \
   --loop_mode pingpong
 ```
-Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manual_joint_type revolute` or `--manual_joint_type prismatic` to force a specific motion family when needed. If you omit the manual override, the pipeline first trusts KPP-Net and, when `--llm_endpoint` + `--llm_api_key` are provided, backs off to the LLM-based classifier described in `inference_pipeline.py`. Outputs share the same MP4/GIF/GLB format as the batch pipeline.
+Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manual_joint_type revolute` or `--manual_joint_type prismatic` to force a specific motion family when needed. If you omit the manual override, the pipeline first trusts KPP-Net and, when `--llm_endpoint` + `--llm_api_key` are provided, backs off to the LLM-based classifier described in `dragmesh/inference/inference_pipeline.py`. Outputs share the same MP4/GIF/GLB format as the batch pipeline.
 
 ## 👀 Visualization
-- GIF/MP4 export depends on `pyrender` and `imageio`. For systems without a display or on remote servers, it is recommended to set: `PYOPENGL_PLATFORM=osmesa`. 
-- `inference_animation.py` also exports animated GLB files for direct use in GLTF viewers.  
-- For additional visualization tooling (e.g., rerun or Blender scripts), see `inference_animation.py` and `inference_pipeline.py`.
+- GIF/MP4 export depends on `pyrender` and `imageio`. For systems without a display or on remote servers, it is recommended to set: `PYOPENGL_PLATFORM=osmesa`.
+- `dragmesh/inference/inference_animation.py` also exports animated GLB files for direct use in GLTF viewers.
+- For additional visualization tooling (e.g., rerun or Blender scripts), see `dragmesh/inference/inference_animation.py` and `dragmesh/inference/inference_pipeline.py`.
 
 ## 👩‍💻 Case Study
 | Scenario | Description |
@@ -213,13 +214,17 @@ Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manua
 ## 🗂️ Repository Tour
 | Path | Content |
 | --- | --- |
-| `modules/model_v2.py` | Dual Quaternion VAE (encoder, decoder, FiLM Transformer). |
-| `modules/predictor.py` | KPP-Net architecture. |
-| `modules/data_loader_v2.py` | GAPartNet parsing and dual quaternion labels. |
-| `utils/balanced_dataset_utils.py` | LMDB dataset builder and balanced sampling utilities. |
-| `scripts/train_vae_v2.py`, `scripts/train_predictor.py` | Training entry points. |
-| `inference_animation*.py`, `inference_pipeline.py` | Inference pipelines (batch and interactive). |
-| `ChamferDistancePytorch/` | CUDA kernels for Chamfer distance and auxiliary metrics. |
+| `dragmesh/models/` | DQ-VAE, KPP-Net, and their training losses. |
+| `dragmesh/geometry/` | Dual-quaternion math and mesh deformation utilities. |
+| `dragmesh/data/` | GAPartNet parsing, LMDB datasets, and dataset wrappers. |
+| `dragmesh/inference/` | Batch, KPP-driven, and custom-mesh inference pipelines. |
+| `dragmesh/utils/` | Logging and KPP normalization helpers. |
+| `scripts/train/` | Training entry points for DQ-VAE and KPP-Net. |
+| `scripts/data/` | Dataset/LMDB construction CLI. |
+| `scripts/p3sam/`, `scripts/evaluation/`, `scripts/analysis/`, `scripts/reviewer/` | Reviewer-response diagnostics and segmentation evaluation utilities. |
+| `configs/` | Dataset/category split configuration. |
+
+Model checkpoints, LMDBs, rendered videos, and experiment outputs are intentionally not tracked in this repository. Download checkpoints from Hugging Face or place local artifacts under ignored folders such as `checkpoints/`, `data/`, `outputs/`, or `results/`.
 
 ### 🌳 Project Tree (annotated)
 ```
@@ -227,33 +232,24 @@ DragMesh/
 ├── assets/                      # Logos, teaser figures, future demo media
 │   ├── dragmesh_logo.png
 │   └── teaser.png
-checkpoints/                
-│   ├── dqvae.pth             
-│   └── kpp.pth
-├── ChamferDistancePytorch/      # CUDA/C++ Chamfer distance implementation (build with setup.py)
-├── config/
+├── configs/
 │   └── category_split_v2.json   # GAPartNet in-domain split definition
-├── modules/
-│   ├── model_v2.py              # Dual Quaternion VAE architecture
-│   ├── predictor.py             # KPP-Net for kinematic reasoning
-│   ├── loss.py                  # VAE objectives (Chamfer, dual quaternions, constraints)
-│   ├── predictor_loss.py        # Loss terms for KPP-Net
-│   └── data_loader_v2.py        # GAPartNet loader + dual quaternion ground truth builder
+├── dragmesh/
+│   ├── data/                    # GAPartNet loaders, LMDB datasets, data wrappers
+│   ├── geometry/                # Dual-quaternion and deformation math
+│   ├── inference/               # Batch/KPP/custom mesh inference CLIs
+│   ├── models/                  # DQ-VAE, KPP-Net, and loss modules
+│   └── utils/                   # Logging and normalization helpers
 ├── scripts/
-│   ├── train_vae_v2.py          # Training loop for the VAE motion prior
-│   └── train_predictor.py       # Training loop for KPP-Net
-├── utils/
-│   ├── balanced_dataset_utils.py # LMDB dataset class + balanced sampling helper
-│   ├── dataset_utils.py          # Category-aware dataset wrappers
-│   └── build_lmdb.py             # CLI to build LMDBs from GAPartNet folders
-├── partnet/
-│   └── Hunyuan3D-Part/           # External resources (P3-SAM, XPart docs)
-├── results_deterministic/        # Placeholder for inference outputs (MP4/GIF/GLB)
-├── inference_animation.py        # Batch evaluation + GLB export
-├── inference_animation_kpp.py    # Dataset-driven animation tests (legacy interface)
-├── inference_pipeline.py         # Interactive mesh manipulation pipeline
+│   ├── analysis/                # Error propagation and normalization checks
+│   ├── data/                    # LMDB builder
+│   ├── evaluation/              # Mask and joint-type evaluation
+│   ├── p3sam/                   # P3-SAM post-processing and local-union pipeline
+│   ├── reviewer/                # Reviewer Q4 diagnostics
+│   └── train/                   # Training loops
 ├── requirements.txt              # Python dependencies
-├── README.md                     
+├── environment.yml               # Conda environment
+└── README.md
 ```
 
 ## 🙏 Acknowledgement

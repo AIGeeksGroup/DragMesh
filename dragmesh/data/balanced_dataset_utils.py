@@ -77,6 +77,7 @@ def _worker_process_sample(idx):
         keys_to_save = [
             'initial_mesh', 'drag_point', 'drag_vector', 'qr_gt', 'qd_gt', 
             'joint_type', 'joint_axis', 'joint_origin', 'part_mask',
+            'norm_center', 'norm_scale', 'origin_normalization_version',
             'rotation_direction', 'trajectory_vectors', 'drag_trajectory'
         ]
         for k in keys_to_save:

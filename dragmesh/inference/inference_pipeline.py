@@ -3,6 +3,7 @@
 # -------------------------------------------------------------------
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -12,11 +13,11 @@ import numpy as np
 import torch
 import trimesh
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from modules.model_v2 import DualQuaternionVAE
-from modules.predictor import KeypointPredictor
-from inference_animation import run_animation_from_sample
+from dragmesh.models.model_v2 import DualQuaternionVAE
+from dragmesh.models.predictor import KeypointPredictor
+from dragmesh.inference.inference_animation import run_animation_from_sample
 
 try:
     import requests
@@ -35,6 +36,32 @@ except ImportError:
 
 
 
+LABEL_MASK_FORMATS = {"face_labels", "vertex_labels"}
+BINARY_MASK_FORMATS = {"binary_face", "binary_vertex"}
+
+
+def canonical_mask_format(mask_format: str) -> str:
+    # Backward-compatible aliases from the original CLI.
+    if mask_format == "face":
+        return "face_labels"
+    if mask_format == "vertex":
+        return "vertex_labels"
+    return mask_format
+
+
+def load_mask_array(path: str) -> np.ndarray:
+    mask_path = os.path.abspath(path)
+    if mask_path.endswith(".npy"):
+        return np.load(mask_path)
+    if mask_path.endswith(".npz"):
+        data = np.load(mask_path)
+        for key in ("mask", "face_ids", "labels"):
+            if key in data:
+                return data[key]
+        return data[list(data.keys())[0]]
+    raise ValueError(f"Unsupported mask file extension: {path}")
+
+
 def face_to_vertex_labels(faces: np.ndarray, num_vertices: int, face_labels: np.ndarray) -> np.ndarray:
     vertex_faces: List[List[int]] = [[] for _ in range(num_vertices)]
     for fid, face in enumerate(faces):
@@ -50,6 +77,14 @@ def face_to_vertex_labels(faces: np.ndarray, num_vertices: int, face_labels: np.
         counts = np.bincount(np.array(labels, dtype=np.int64))
         vertex_labels[vid] = int(np.argmax(counts))
     return vertex_labels
+
+
+def face_binary_to_vertex_labels(faces: np.ndarray, num_vertices: int, face_mask: np.ndarray) -> np.ndarray:
+    face_labels = np.asarray(face_mask).reshape(-1).astype(np.int64)
+    if face_labels.shape[0] != len(faces):
+        raise ValueError("binary_face mask length mismatch.")
+    face_labels = (face_labels > 0).astype(np.int64)
+    return face_to_vertex_labels(faces, num_vertices, face_labels)
 
 
 def create_bool_mask(indices: np.ndarray, length: int) -> np.ndarray:
@@ -604,9 +639,13 @@ def parse_args():
     parser.add_argument('--mesh_file', type=str, required=True,
                         help='Path to OBJ/GLB mesh (already segmented).')
     parser.add_argument('--mask_file', type=str, default=None,
-                        help='Optional .npy mask (face ids or vertex labels).')
-    parser.add_argument('--mask_format', choices=['face', 'vertex'], default='face',
-                        help='Interpretation of mask_file.')
+                        help='Optional .npy/.npz mask. Use binary_* for movable/rest P3-SAM masks.')
+    parser.add_argument(
+        '--mask_format',
+        choices=['face', 'vertex', 'face_labels', 'vertex_labels', 'binary_face', 'binary_vertex'],
+        default='face_labels',
+        help='Interpretation of mask_file. Legacy aliases: face=face_labels, vertex=vertex_labels.'
+    )
     parser.add_argument('--part_id', type=int, default=None,
                         help='Initial part ID to target (optional).')
 
@@ -645,6 +684,8 @@ def parse_args():
     parser.add_argument('--llm_proxy', type=str, default=None)
     parser.add_argument('--llm_system_prompt', type=str,
                         default="You are an articulation expert. Reply with 'revolute' or 'prismatic'.")
+    parser.add_argument('--audit_log', type=str, default=None,
+                        help='Optional JSONL path for upstream dependency decisions (mask/KPP/LLM/manual).')
     return parser.parse_args()
 
 
@@ -664,20 +705,37 @@ def main():
         mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
     print(f"Loaded mesh: {args.mesh_file} ({len(mesh.vertices)} verts)")
 
+    mask_source = "single_part_default"
+    mask_format = canonical_mask_format(args.mask_format)
     if args.mask_file is not None:
-        mask_array = np.load(args.mask_file)
-        if args.mask_format == 'face':
+        mask_array = np.asarray(load_mask_array(args.mask_file)).reshape(-1)
+        if mask_format == 'face_labels':
             if mask_array.shape[0] != len(mesh.faces):
                 raise ValueError("face mask length mismatch.")
-            vertex_labels = face_to_vertex_labels(mesh.faces, len(mesh.vertices), mask_array)
-        else:
+            vertex_labels = face_to_vertex_labels(mesh.faces, len(mesh.vertices), mask_array.astype(np.int64))
+        elif mask_format == 'vertex_labels':
             if mask_array.shape[0] != len(mesh.vertices):
                 raise ValueError("vertex mask length mismatch.")
             vertex_labels = mask_array.astype(int)
+        elif mask_format == 'binary_face':
+            vertex_labels = face_binary_to_vertex_labels(mesh.faces, len(mesh.vertices), mask_array)
+        elif mask_format == 'binary_vertex':
+            if mask_array.shape[0] != len(mesh.vertices):
+                raise ValueError("binary_vertex mask length mismatch.")
+            vertex_labels = (mask_array > 0).astype(int)
+        else:
+            raise ValueError(f"Unsupported mask format: {args.mask_format}")
+        mask_source = f"{mask_format}_mask_file"
     else:
         vertex_labels = np.zeros(len(mesh.vertices), dtype=int)
 
-    target_part_id = args.part_id if args.part_id is not None else 0
+    if args.part_id is not None:
+        target_part_id = args.part_id
+    elif args.mask_file is not None and mask_format in BINARY_MASK_FORMATS:
+        # P3-SAM prompted masks are binary movable/rest masks; positive is movable.
+        target_part_id = 1
+    else:
+        target_part_id = 0
     drag_point = args.drag_point
     drag_vector = args.drag_vector
 
@@ -724,16 +782,21 @@ def main():
         device
     )
     kpp_joint_type = int(torch.argmax(pred_type_logits, dim=-1).item()) if pred_type_logits is not None else 0
+    kpp_type_probs = None
+    if pred_type_logits is not None:
+        kpp_type_probs = torch.softmax(pred_type_logits, dim=-1).squeeze(0).detach().cpu().numpy().tolist()
     joint_axis = pred_axis.squeeze(0).cpu().numpy()
     joint_axis = joint_axis / (np.linalg.norm(joint_axis) + 1e-8)
     joint_origin_norm = pred_origin.squeeze(0).cpu().numpy()
     joint_origin = joint_origin_norm * scale + center
 
     final_joint_type = kpp_joint_type
+    joint_type_source = "kpp"
     llm_response = None
 
     if args.manual_joint_type is not None:
         final_joint_type = 0 if args.manual_joint_type == 'revolute' else 1
+        joint_type_source = "manual"
         print(f"Manual joint type override: {args.manual_joint_type}")
     elif args.llm_endpoint and requests is not None:
         classifier = LLMJointClassifier(
@@ -751,8 +814,38 @@ def main():
         )
         if llm_type is not None:
             final_joint_type = llm_type
+            joint_type_source = "llm"
+        else:
+            joint_type_source = "kpp_fallback_after_llm"
     elif args.llm_endpoint and requests is None:
         print("requests not installed; skipping LLM.")
+
+    if args.audit_log:
+        audit_path = os.path.abspath(args.audit_log)
+        os.makedirs(os.path.dirname(audit_path), exist_ok=True)
+        audit_row = {
+            "mesh_file": os.path.abspath(args.mesh_file),
+            "mask_file": os.path.abspath(args.mask_file) if args.mask_file else None,
+            "mask_source": mask_source,
+            "mask_format": mask_format,
+            "target_part_id": int(target_part_id),
+            "target_positive_vertices": int(mask_bool.sum()),
+            "total_vertices": int(len(mask_bool)),
+            "drag_point": drag_point.tolist(),
+            "drag_vector": drag_vector.tolist(),
+            "kpp_joint_type": "revolute" if kpp_joint_type == 0 else "prismatic",
+            "kpp_type_probs": kpp_type_probs,
+            "llm_enabled": bool(args.llm_endpoint and requests is not None),
+            "llm_model": args.llm_model if args.llm_endpoint else None,
+            "llm_response": llm_response,
+            "manual_joint_type": args.manual_joint_type,
+            "final_joint_type": "revolute" if final_joint_type == 0 else "prismatic",
+            "joint_type_source": joint_type_source,
+            "joint_axis": joint_axis.tolist(),
+            "joint_origin": joint_origin.tolist(),
+        }
+        with open(audit_path, "a") as f:
+            f.write(json.dumps(audit_row, sort_keys=True) + "\n")
 
     sample_dict = {
         'initial_mesh': mesh,
