@@ -493,14 +493,14 @@ def table_to_latex(rows: List[Dict[str, object]], fieldnames: Sequence[str], cap
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trajectory_csv", type=Path, default=Path("/home/data2/zhangaho/1/zhangh/results/kpp_retrain_runs/full_gapartnet_kpp_20260503_120142/eval_fixed_python_env/debug/trajectory_metrics_dragmesh.csv"))
-    parser.add_argument("--manifest_json", type=Path, default=Path("/data2/zhangaho/1/zhangh/results/eval_manifest_user_drag_v3.json"))
+    parser.add_argument("--trajectory_csv", type=Path, required=True)
+    parser.add_argument("--manifest_json", type=Path, required=True)
     parser.add_argument("--p3sam_metrics_csv", type=Path, default=None, help="Fallback mask CSV for the downstream gate row.")
     parser.add_argument("--raw_p3sam_metrics_csv", type=Path, default=Path("results/p3sam_gap25_nonoracle_local_region_raw/per_case_metrics.csv"))
     parser.add_argument("--fixed_p3sam_metrics_csv", type=Path, default=Path("results/p3sam_gap25_nonoracle_local_union_fixed/per_case_metrics.csv"))
     parser.add_argument("--category_p3sam_metrics_csv", type=Path, default=Path("results/p3sam_gap25_nonoracle_local_union_loco/per_case_metrics.csv"))
     parser.add_argument("--oracle_p3sam_metrics_csv", type=Path, default=Path("results/p3sam_gap25_oracle_centroid_upper_bound/per_case_metrics.csv"))
-    parser.add_argument("--p3sam_manifest_csv", type=Path, default=Path("/data2/zhangaho/1/zhangh/results/p3sam_gap25_predictions_clean0/gap25_p3sam_eval_manifest.csv"))
+    parser.add_argument("--p3sam_manifest_csv", type=Path, required=True)
     parser.add_argument("--gpt_type_csv", type=Path, default=None, help="Optional CSV with case_id and pred_joint_type/gpt_joint_type/response.")
     parser.add_argument("--kpp_checkpoint", type=Path, default=Path("outputs/kpp_full_bbox_center_full_gapartnet_kpp_20260503_120142/best_model_kpp.pth"))
     parser.add_argument("--output_dir", type=Path, default=Path("results/reviewer_q4_diagnostics_nonoracle"))

@@ -501,12 +501,12 @@ def main() -> None:
     parser.add_argument(
         "--p3sam_manifest",
         type=Path,
-        default=Path("/data2/zhangaho/1/zhangh/results/p3sam_gap25_predictions_clean0/gap25_p3sam_eval_manifest.csv"),
+        required=True,
     )
     parser.add_argument(
         "--drag_manifest_json",
         type=Path,
-        default=Path("/data2/zhangaho/1/zhangh/results/eval_manifest_user_drag_v3.json"),
+        required=True,
     )
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument("--mode", choices=[RAW_DRAG_SELECTED, FIXED_LOCAL_UNION, LOCO_LOCAL_UNION, ORACLE_CENTROID], required=True)

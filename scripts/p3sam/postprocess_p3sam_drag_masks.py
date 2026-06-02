@@ -316,8 +316,8 @@ def postprocess_mask(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--p3sam_manifest", type=Path, default=Path("/data2/zhangaho/1/zhangh/results/p3sam_gap25_predictions_clean0/gap25_p3sam_eval_manifest.csv"))
-    parser.add_argument("--drag_manifest_json", type=Path, default=Path("/data2/zhangaho/1/zhangh/results/eval_manifest_user_drag_v3.json"))
+    parser.add_argument("--p3sam_manifest", type=Path, required=True)
+    parser.add_argument("--drag_manifest_json", type=Path, required=True)
     parser.add_argument("--output_dir", type=Path, default=Path("results/p3sam_gap25_drag_postprocess"))
     parser.add_argument("--prompt_mode", choices=["gt_centroid", "gt_farthest_from_object_center", "manifest_drag"], default="gt_centroid")
     parser.add_argument("--profile", choices=["fixed", "category"], default="category",

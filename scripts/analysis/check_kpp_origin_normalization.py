@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from dragmesh.utils.kpp_normalization import (  # noqa: E402
     KPP_ORIGIN_NORMALIZATION,

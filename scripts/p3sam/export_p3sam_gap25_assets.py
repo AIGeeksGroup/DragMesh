@@ -39,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--cases_csv",
         type=Path,
-        default=Path("/home/data2/zhangaho/1/zhangh/results/dependency_error_propagation/dependency_error_propagation_cases.csv"),
+        required=True,
     )
     parser.add_argument(
         "--dataset_root",
@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("/home/data2/zhangaho/1/zhangh/results/p3sam_gap25_assets"),
+        default=Path("results/p3sam_gap25_assets"),
     )
     parser.add_argument("--num_frames", type=int, default=16)
     args = parser.parse_args()

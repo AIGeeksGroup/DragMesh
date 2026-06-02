@@ -375,7 +375,7 @@ def main() -> None:
     parser.add_argument(
         "--trajectory_csv",
         type=Path,
-        default=Path("/home/data2/zhangaho/1/zhangh/results/kpp_retrain_runs/full_gapartnet_kpp_20260503_120142/eval_fixed_python_env/debug/trajectory_metrics_dragmesh.csv"),
+        required=True,
         help="Locked DragMesh trajectory/kinematic metrics CSV.",
     )
     parser.add_argument(
@@ -393,7 +393,7 @@ def main() -> None:
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("/home/data2/zhangaho/1/zhangh/results/dependency_error_propagation"),
+        default=Path("results/dependency_error_propagation"),
         help="Directory for audit outputs.",
     )
     args = parser.parse_args()

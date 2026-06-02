@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "Interactive 3D articulation generation with kinematic priors and dual quaternions."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
 
 [tool.setuptools.packages.find]
 where = ["."]
