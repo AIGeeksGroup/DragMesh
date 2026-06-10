@@ -12,8 +12,6 @@ Official repository for the paper
 > [!NOTE]
 >  GAPartNet (link above) is the canonical dataset source for all articulated assets used in DragMesh.
 
-## 📄 Teaser Presentation
-![DragMesh articulation teaser](assets/articulation_teaser.png)
 
 https://github.com/user-attachments/assets/428b0d36-50ab-4b46-ab17-679ad22c826b
 
@@ -36,6 +34,7 @@ If you find DragMesh helpful, please cite:
 
 While generative models have excelled at creating static 3D content, the pursuit of systems that understand how objects move and respond to interactions remains a fundamental challenge. Current methods for articulated motion lie at a crossroads: they are either physically consistent but too slow for real-time use, or generative but violate basic kinematic constraints. We present DragMesh, a robust framework for real-time interactive 3D articulation built around a lightweight motion generation core. Our core contribution is a novel decoupled kinematic reasoning and motion generation framework. First, we infer the latent joint parameters by decoupling semantic intent reasoning (which determines the joint type) from geometric regression (which determines the axis and origin using our Kinematics Prediction Network (KPP-Net)). Second, to leverage the compact, continuous, and singularity-free properties of dual quaternions for representing rigid body motion, we develop a novel Dual Quaternion VAE (DQ-VAE). This DQ-VAE receives these predicted priors, along with the original user drag, to generate a complete, plausible motion trajectory. To ensure strict adherence to kinematics, we inject the joint priors at every layer of the DQ-VAE's non-autoregressive Transformer decoder using FiLM (Feature-wise Linear Modulation) conditioning. This persistent, multi-scale guidance is complemented by a numerically-stable cross-product loss to guarantee axis alignment. This decoupled design allows DragMesh to achieve real-time performance and enables plausible, generative articulation on novel objects without retraining, offering a practical step toward generative 3D intelligence.
 
+![DragMesh articulation teaser](assets/articulation_teaser.png)
 
 ## 📰 News
 
