@@ -443,7 +443,7 @@ class FixedGAPartNetLoader(GAPartNetLoaderV2):
 def load_model(checkpoint_path, device, args):
     """Load the VAE model from a checkpoint."""
     try:
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     except Exception as e:
         print(f"Error: unable to load checkpoint: {e}")
         return None, 16
@@ -591,7 +591,7 @@ def run_vae_diversity_test(model, loader, sample_idx, device, output_dir, num_fr
     # Export the static initial mesh as a reference.
     try:
         initial_mesh.export(os.path.join(output_dir_id, 'initial_static.glb'))
-    except:
+    except Exception:
         pass
 
     # --- 6) VAE decoder (multi-sample) ---

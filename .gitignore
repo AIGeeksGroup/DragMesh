@@ -16,15 +16,15 @@ venv/
 env/
 
 # Generated data, model weights, and experiment outputs
-data/
-checkpoints/
-outputs/
-output/
-results/
-runs/
-logs/
-wandb/
-tensorboard/
+/data/
+/checkpoints/
+/outputs/
+/output/
+/results/
+/runs/
+/logs/
+/wandb/
+/tensorboard/
 
 # Heavy model/data/media artifacts
 *.pth

@@ -395,7 +395,7 @@ def main(args):
     # --- Resume ---
     if args.resume and os.path.isfile(args.resume):
         print(f"\nLoading checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location=device)
+        checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
         try:
             model.load_state_dict(checkpoint['model_state_dict'], strict=True)
             print(" Model loaded (strict=True)")

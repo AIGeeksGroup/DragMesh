@@ -42,7 +42,7 @@ class FixedGAPartNetLoader(GAPartNetLoaderV2):
                             category = meta.get('model_cat', None)
                             if category not in self.categories:
                                 continue
-                    except:
+                    except (OSError, ValueError):
                         continue
                 else:
                     continue

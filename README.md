@@ -58,7 +58,7 @@ conda env update -f environment.yml --prune
 pip install -e .
 ```
 
-The spec already installs trimesh, pyrender, pygltflib, viser, Objaverse, SAPIEN, pytorch3d, and tiny-cuda-nn.
+The spec installs PyTorch plus everything in `requirements.txt` (trimesh, pyrender, pygltflib, viser, etc.).
 
 ### 🛠️ Native Extensions
 Chamfer distance kernels are required for the VAE loss. Clone and build the upstream project:
@@ -165,15 +165,15 @@ python -m dragmesh.inference.inference_animation_kpp \
 ### Custom mesh manipulation (manual input)
 ```bash
 python -m dragmesh.inference.inference_pipeline \
-  --mesh_file assets/cabinet.obj \
-  --mask_file assets/cabinet_vertex_labels.npy \
+  --mesh_file path/to/your_mesh.obj \
+  --mask_file path/to/your_vertex_labels.npy \
   --mask_format vertex \
   --drag_point 0.12,0.48,0.05 \
   --drag_vector 0.0,0.0,0.2 \
   --manual_joint_type revolute \
   --kpp_checkpoint best_model_kpp.pth \
   --vae_checkpoint best_model.pth \
-  --output_dir outputs/cabinet_demo \
+  --output_dir outputs/custom_demo \
   --num_samples 3 \
   --fps 5 \
   --loop_mode pingpong
@@ -222,7 +222,7 @@ Supply drag points/vectors directly through the CLI (no viewer UI). Use `--manua
 | `dragmesh/utils/` | Logging and KPP normalization helpers. |
 | `scripts/train/` | Training entry points for DQ-VAE and KPP-Net. |
 | `scripts/data/` | Dataset/LMDB construction CLI. |
-| `scripts/p3sam/`, `scripts/evaluation/`, `scripts/analysis/`, `scripts/reviewer/` | Reviewer-response diagnostics and segmentation evaluation utilities. |
+| `scripts/p3sam/`, `scripts/evaluation/`, `scripts/analysis/`, `scripts/diagnostics/` | Dependency diagnostics and segmentation evaluation utilities. |
 | `configs/` | Dataset/category split configuration. |
 
 Model checkpoints, LMDBs, rendered videos, and experiment outputs are intentionally not tracked in this repository. Download checkpoints from Hugging Face or place local artifacts under ignored folders such as `checkpoints/`, `data/`, `outputs/`, or `results/`.
@@ -246,7 +246,7 @@ DragMesh/
 │   ├── data/                    # LMDB builder
 │   ├── evaluation/              # Mask and joint-type evaluation
 │   ├── p3sam/                   # P3-SAM post-processing and local-union pipeline
-│   ├── reviewer/                # Reviewer Q4 diagnostics
+│   ├── diagnostics/             # Upstream dependency diagnostics
 │   └── train/                   # Training loops
 ├── requirements.txt              # Python dependencies
 ├── environment.yml               # Conda environment

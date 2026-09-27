@@ -326,7 +326,7 @@ def main(args):
 
     if args.resume and os.path.isfile(args.resume):
         print(f"\nLoading checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location=device)
+        checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
 
         try:
             model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -339,7 +339,7 @@ def main(args):
         if 'scheduler_state_dict' in checkpoint:
             try:
                 scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            except:
+            except Exception:
                 print(" Scheduler state not fully loaded. Skipping.")
 
         start_epoch = checkpoint.get('epoch', 0)

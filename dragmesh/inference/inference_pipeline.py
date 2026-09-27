@@ -529,7 +529,7 @@ def run_kpp_inference(kpp_model: KeypointPredictor,
 
 
 def load_kpp_model(checkpoint_path: str, device: torch.device) -> KeypointPredictor:
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     config = checkpoint.get('config', {})
     kpp_model = KeypointPredictor(
         use_mask=config.get('use_mask', True),
@@ -546,7 +546,7 @@ def load_kpp_model(checkpoint_path: str, device: torch.device) -> KeypointPredic
 
 
 def load_vae_model(checkpoint_path: str, device: torch.device, override_frames: Optional[int]) -> Tuple[DualQuaternionVAE, int]:
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     config = checkpoint.get('config', {})
     latent_dim = config.get('latent_dim', 256)
     num_frames = override_frames if override_frames is not None else config.get('num_frames', 16)

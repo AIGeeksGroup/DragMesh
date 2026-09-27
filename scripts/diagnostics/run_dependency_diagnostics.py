@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reviewer-Q4 diagnostics for optional foundation-model dependencies.
+"""Diagnostics for optional foundation-model dependencies.
 
 This script builds two small tables:
 
@@ -32,7 +32,7 @@ import trimesh
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-from inference_pipeline import face_binary_to_vertex_labels, face_to_vertex_labels, load_mask_array
+from dragmesh.inference.inference_pipeline import face_binary_to_vertex_labels, face_to_vertex_labels, load_mask_array
 
 
 TRUE_VALUES = {"1", "true", "t", "yes", "y"}
@@ -502,8 +502,8 @@ def main() -> None:
     parser.add_argument("--oracle_p3sam_metrics_csv", type=Path, default=Path("results/p3sam_gap25_oracle_centroid_upper_bound/per_case_metrics.csv"))
     parser.add_argument("--p3sam_manifest_csv", type=Path, required=True)
     parser.add_argument("--gpt_type_csv", type=Path, default=None, help="Optional CSV with case_id and pred_joint_type/gpt_joint_type/response.")
-    parser.add_argument("--kpp_checkpoint", type=Path, default=Path("outputs/kpp_full_bbox_center_full_gapartnet_kpp_20260503_120142/best_model_kpp.pth"))
-    parser.add_argument("--output_dir", type=Path, default=Path("results/reviewer_q4_diagnostics_nonoracle"))
+    parser.add_argument("--kpp_checkpoint", type=Path, default=Path("outputs/kpp/best_model_kpp.pth"))
+    parser.add_argument("--output_dir", type=Path, default=Path("results/dependency_diagnostics_nonoracle"))
     parser.add_argument("--run_p3sam_kpp", action="store_true", help="Rerun KPP with saved P3-SAM masks.")
     parser.add_argument("--p3sam_kpp_csv", type=Path, default=None, help="Reuse an existing P3-SAM+KPP CSV instead of rerunning.")
     parser.add_argument("--include_p3sam_kpp_downstream", action="store_true",
@@ -662,7 +662,7 @@ def main() -> None:
         table_to_latex(table_b, table_b_fields, "Downstream effect of automatic components on GAP-25.", "tab:automatic_component_downstream")
     )
     report_lines = [
-        "# Reviewer Q4 Diagnostic Tables",
+        "# Dependency Diagnostic Tables",
         "",
         "## Table A: Optional foundation-model diagnostics on GAP-25",
         "",
@@ -674,8 +674,8 @@ def main() -> None:
         "",
         "Note: GPT-4o rows are only filled when `--gpt_type_csv` is supplied. The P3-SAM rows are localization-gated diagnostics: KPP predictions are kept fixed to the provided-mask setting to isolate the effect of target-part localization.",
     ]
-    (args.output_dir / "reviewer_q4_diagnostic_tables.md").write_text("\n".join(report_lines))
-    print(f"Wrote {args.output_dir / 'reviewer_q4_diagnostic_tables.md'}")
+    (args.output_dir / "dependency_diagnostic_tables.md").write_text("\n".join(report_lines))
+    print(f"Wrote {args.output_dir / 'dependency_diagnostic_tables.md'}")
     print(table_to_markdown(table_a, table_a_fields))
     print()
     print(table_to_markdown(table_b, table_b_fields))

@@ -85,7 +85,7 @@ def proposal_diagnostics(
 ) -> Dict[str, object]:
     from scripts.evaluation.evaluate_p3sam_mask_metrics import as_face_array, binary_metrics, load_mask
     from scripts.p3sam.postprocess_p3sam_drag_masks_nonoracle import load_mesh_fast
-    from scripts.run_p3sam_local_union_pipeline import FIXED_PARAMS, local_seed_mask, score_proposals
+    from scripts.p3sam.run_p3sam_local_union_pipeline import FIXED_PARAMS, local_seed_mask, score_proposals
 
     mesh_path = resolve_existing(src["mesh_path"], root)
     pred_path = resolve_existing(src["pred_mask_path"], root)

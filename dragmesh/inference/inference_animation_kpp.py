@@ -42,7 +42,7 @@ def _parse_vec3(value: Optional[str]) -> Optional[np.ndarray]:
 
 def load_kpp_model(checkpoint_path: str, device: torch.device) -> Optional[KeypointPredictor]:
     try:
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     except Exception as exc:
         print(f"Error: unable to load KPP checkpoint: {exc}")
         return None

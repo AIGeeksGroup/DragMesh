@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""用 OpenAI-compatible API 批量评估 25 个交互 case 的关节类型。
+"""Batch-evaluate joint-type prediction on interaction cases via an OpenAI-compatible API.
 
-输入 JSON 或 CSV 需要包含字段：
-- id 或 case_id
+The input JSON or CSV must contain the fields:
+- id or case_id
 - category
 - interaction
 - gt_joint_type: revolute / prismatic / static
 
-示例：
-python scripts/run_llm_joint_type_eval.py \
+Example:
+python scripts/evaluation/run_llm_joint_type_eval.py \
   --input results/gap25_joint_type_cases.json \
   --output_dir results/llm_joint_type_eval \
   --model gpt-4o
@@ -41,7 +41,7 @@ USER_PROMPT_TEMPLATE = (
 
 @dataclass(frozen=True)
 class TestCase:
-    """单个关节类型测试样本。"""
+    """A single joint-type test case."""
 
     case_id: str
     category: str
@@ -51,7 +51,7 @@ class TestCase:
 
 @dataclass
 class PredictionRow:
-    """单个样本的模型预测与评估结果。"""
+    """Model prediction and evaluation result for one case."""
 
     case_id: str
     category: str
@@ -64,7 +64,7 @@ class PredictionRow:
 
 
 def normalize_joint_type(value: object) -> str:
-    """把 API 返回或 GT 字段规范化到三个合法类别之一。"""
+    """Normalise an API answer or GT field to one of the three valid classes."""
 
     text = str(value or "").strip().lower()
     text = text.replace(".", "").replace(",", "")
@@ -74,24 +74,24 @@ def normalize_joint_type(value: object) -> str:
 
 
 def read_json_cases(path: Path) -> List[TestCase]:
-    """读取 JSON 数据；支持 list 或 {"cases": [...]} 两种格式。"""
+    """Load JSON input; accepts either a list or {"cases": [...]}."""
 
     data = json.loads(path.read_text(encoding="utf-8"))
     rows = data.get("cases", data) if isinstance(data, dict) else data
     if not isinstance(rows, list):
-        raise ValueError(f"JSON 输入应为 list 或包含 cases 的 dict: {path}")
+        raise ValueError(f"JSON input must be a list or a dict with 'cases': {path}")
     return [row_to_case(row) for row in rows]
 
 
 def read_csv_cases(path: Path) -> List[TestCase]:
-    """读取 CSV 数据。"""
+    """Load CSV input."""
 
     with path.open(newline="", encoding="utf-8") as f:
         return [row_to_case(row) for row in csv.DictReader(f)]
 
 
 def row_to_case(row: Dict[str, object]) -> TestCase:
-    """把原始行转换为强类型 TestCase，并做必要字段检查。"""
+    """Convert a raw row into a typed TestCase and validate required fields."""
 
     case_id = str(row.get("id") or row.get("case_id") or "").strip()
     category = str(row.get("category") or "").strip()
@@ -108,7 +108,7 @@ def row_to_case(row: Dict[str, object]) -> TestCase:
     if gt_joint_type == "error":
         missing.append("gt_joint_type")
     if missing:
-        raise ValueError(f"case 字段缺失或非法: {missing}; row={row}")
+        raise ValueError(f"Missing or invalid case fields: {missing}; row={row}")
 
     return TestCase(
         case_id=case_id,
@@ -119,14 +119,14 @@ def row_to_case(row: Dict[str, object]) -> TestCase:
 
 
 def load_cases(path: Path) -> List[TestCase]:
-    """根据扩展名自动读取 JSON 或 CSV。"""
+    """Load JSON or CSV depending on the file extension."""
 
     suffix = path.suffix.lower()
     if suffix == ".json":
         return read_json_cases(path)
     if suffix == ".csv":
         return read_csv_cases(path)
-    raise ValueError(f"只支持 .json 或 .csv 输入: {path}")
+    raise ValueError(f"Only .json or .csv input is supported: {path}")
 
 
 def call_llm_joint_type(
@@ -138,7 +138,7 @@ def call_llm_joint_type(
     max_retries: int,
     retry_sleep: float,
 ) -> str:
-    """调用 OpenAI-compatible Chat Completions API，并带指数退避重试。"""
+    """Call an OpenAI-compatible Chat Completions API with exponential-backoff retries."""
 
     user_prompt = USER_PROMPT_TEMPLATE.format(
         category=case.category,
@@ -148,7 +148,7 @@ def call_llm_joint_type(
     last_error: Optional[BaseException] = None
     for attempt in range(max_retries + 1):
         try:
-            # openai>=1.0.0 的官方 SDK 风格：client.chat.completions.create(...)
+            # openai>=1.0.0 SDK style: client.chat.completions.create(...)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -160,7 +160,7 @@ def call_llm_joint_type(
             )
             content = response.choices[0].message.content
             return str(content or "")
-        except Exception as exc:  # noqa: BLE001 - API 兼容端可能抛出不同异常类型
+        except Exception as exc:  # noqa: BLE001 - compatible endpoints may raise different exception types
             last_error = exc
             if attempt >= max_retries:
                 break
@@ -168,7 +168,7 @@ def call_llm_joint_type(
             print(f"[retry] {case.case_id}: attempt={attempt + 1}, sleep={sleep_s:.1f}s, error={exc}")
             time.sleep(sleep_s)
 
-    raise RuntimeError(f"API 调用失败: case_id={case.case_id}, error={last_error}")
+    raise RuntimeError(f"API call failed: case_id={case.case_id}, error={last_error}")
 
 
 def predict_case(
@@ -180,7 +180,7 @@ def predict_case(
     max_retries: int,
     retry_sleep: float,
 ) -> PredictionRow:
-    """预测单个 case，并做 deterministic parsing。"""
+    """Predict a single case and parse the answer deterministically."""
 
     try:
         raw_response = call_llm_joint_type(
@@ -211,7 +211,7 @@ def predict_case(
 
 
 def write_predictions_csv(path: Path, rows: Iterable[PredictionRow]) -> None:
-    """保存每个 case 的完整预测结果。"""
+    """Save the full prediction for every case."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
@@ -232,7 +232,7 @@ def write_predictions_csv(path: Path, rows: Iterable[PredictionRow]) -> None:
 
 
 def write_failure_cases(path: Path, rows: List[PredictionRow]) -> None:
-    """保存错误样本，便于后续 error analysis。"""
+    """Save misclassified cases for error analysis."""
 
     failures = [
         {
@@ -252,7 +252,7 @@ def write_failure_cases(path: Path, rows: List[PredictionRow]) -> None:
 
 
 def write_summary(path: Path, rows: List[PredictionRow], model: str) -> None:
-    """保存总体 accuracy 和逐类统计。"""
+    """Save overall accuracy and per-class statistics."""
 
     total = len(rows)
     correct = sum(row.correct for row in rows)
@@ -282,13 +282,13 @@ def write_summary(path: Path, rows: List[PredictionRow], model: str) -> None:
 
 
 def build_client(api_key: Optional[str], base_url: Optional[str]) -> object:
-    """构造 OpenAI SDK client；base_url 可指向兼容 OpenAI 协议的内部 API。"""
+    """Build the OpenAI SDK client; base_url may point to any OpenAI-compatible endpoint."""
 
     from openai import OpenAI
 
     resolved_key = api_key or os.environ.get("OPENAI_API_KEY")
     if not resolved_key:
-        raise EnvironmentError("缺少 API key：请设置 OPENAI_API_KEY 或传入 --api_key")
+        raise EnvironmentError("Missing API key: set OPENAI_API_KEY or pass --api_key")
 
     if base_url:
         return OpenAI(api_key=resolved_key, base_url=base_url)
@@ -297,15 +297,15 @@ def build_client(api_key: Optional[str], base_url: Optional[str]) -> object:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True, help="测试集 JSON/CSV，包含 id/category/interaction/gt_joint_type")
+    parser.add_argument("--input", type=Path, required=True, help="test-set JSON/CSV with id/category/interaction/gt_joint_type")
     parser.add_argument("--output_dir", type=Path, default=Path("results/llm_joint_type_eval"))
     parser.add_argument("--model", type=str, default="gpt-4o")
-    parser.add_argument("--api_key", type=str, default=None, help="默认读取 OPENAI_API_KEY")
-    parser.add_argument("--base_url", type=str, default=None, help="OpenAI-compatible API base URL，可选")
+    parser.add_argument("--api_key", type=str, default=None, help="defaults to $OPENAI_API_KEY")
+    parser.add_argument("--base_url", type=str, default=None, help="optional OpenAI-compatible API base URL")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max_retries", type=int, default=3)
     parser.add_argument("--retry_sleep", type=float, default=2.0)
-    parser.add_argument("--limit", type=int, default=None, help="调试用：只跑前 N 个 case")
+    parser.add_argument("--limit", type=int, default=None, help="debug: only run the first N cases")
     return parser.parse_args()
 
 

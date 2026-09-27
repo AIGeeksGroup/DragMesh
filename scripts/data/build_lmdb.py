@@ -52,7 +52,7 @@ class SmartProcessingDataset(Dataset):
                             meta = json.load(f)
                             if meta.get('model_cat') in categories:
                                 self.valid_indices.append(i)
-                    except:
+                    except (OSError, ValueError):
                         pass
             print(f"Found {len(self.valid_indices)} objects matching categories.")
         else:

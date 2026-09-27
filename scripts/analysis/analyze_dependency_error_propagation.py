@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Audit upstream dependency accuracy and downstream error propagation.
 
-The IJCV revision asks for accuracy, failure modes, and downstream propagation
-for optional joint-type classifiers (GPT/VLM or KPP head) and segmentation
-front ends such as P3-SAM. This script intentionally works from locked eval
+Reports accuracy, failure modes, and downstream propagation for optional
+joint-type classifiers (GPT/VLM or KPP head) and segmentation front ends such
+as P3-SAM. This script intentionally works from locked eval
 artifacts: it does not rerun inference or alter metric definitions.
 """
 
@@ -274,7 +274,7 @@ def make_markdown_report(
         lines += [
             "- No P3-SAM prediction metrics were supplied or found for this DragMesh run.",
             "- Therefore the current quantitative GAP-25 result should be described as using provided/ground-truth part labels for the movable mask.",
-            "- The correct reviewer response is to state that P3-SAM is an optional annotation-free front end and to report mask-error propagation qualitatively unless a P3-SAM-vs-GT mask CSV is generated.",
+            "- P3-SAM is an optional annotation-free front end; report mask-error propagation qualitatively unless a P3-SAM-vs-GT mask CSV is generated.",
         ]
     else:
         parsed_seg = parse_segmentation_rows(segmentation_rows)
