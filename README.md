@@ -7,6 +7,8 @@ Official repository for the paper
 >
 > \*Equal contribution. †Project lead. <sup>#</sup>Corresponding author.
 >
+> ***IJCV 2026***
+>
 > ### [Paper](https://www.arxiv.org/abs/2512.06424) | [Website](https://aigeeksgroup.github.io/DragMesh) | [Models](https://huggingface.co/AIGeeksGroup/DragMesh) | [HF Paper](https://huggingface.co/papers/2512.06424)
 
 > [!NOTE]
